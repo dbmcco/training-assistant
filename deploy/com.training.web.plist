@@ -12,7 +12,7 @@
         <string>--host</string>
         <string>127.0.0.1</string>
         <string>--port</string>
-        <string>3000</string>
+        <string>4100</string>
     </array>
     <key>WorkingDirectory</key>
     <string>/Users/braydon/projects/experiments/training-assistant/web</string>
