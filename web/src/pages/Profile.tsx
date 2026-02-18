@@ -100,8 +100,8 @@ function RecordsSection({
   }
 
   return (
-    <div className="rounded-xl bg-gray-900 border border-gray-800 overflow-hidden">
-      <table className="w-full text-sm">
+    <div className="rounded-xl bg-gray-900 border border-gray-800 overflow-x-auto">
+      <table className="w-full text-sm min-w-[480px]">
         <thead>
           <tr className="border-b border-gray-800">
             <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wide">

@@ -93,8 +93,8 @@ export default function WeekCalendar({
         </button>
       </div>
 
-      {/* 7-day grid */}
-      <div className="grid grid-cols-7 gap-2">
+      {/* 7-day grid — horizontal scroll on mobile, grid on desktop */}
+      <div className="flex md:grid md:grid-cols-7 gap-2 overflow-x-auto snap-x snap-mandatory pb-2 -mx-2 px-2 md:mx-0 md:px-0 md:pb-0 md:overflow-visible">
         {days.map((day) => {
           const dayWorkouts = workoutsByDate[day.dateStr] ?? []
           const today = isToday(day.date)
@@ -102,7 +102,7 @@ export default function WeekCalendar({
           return (
             <div
               key={day.dateStr}
-              className={`rounded-xl border p-3 min-h-[140px] transition-colors ${
+              className={`rounded-xl border p-3 min-h-[140px] min-w-[140px] md:min-w-0 snap-start shrink-0 md:shrink transition-colors ${
                 today
                   ? 'border-blue-500/50 bg-blue-500/5'
                   : 'border-gray-800 bg-gray-900'

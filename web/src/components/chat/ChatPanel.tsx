@@ -156,12 +156,12 @@ export default function ChatPanel({ isOpen, onToggle }: ChatPanelProps) {
     }
   }
 
-  // Collapsed state: floating button
+  // Collapsed state: floating button (desktop only — mobile uses BottomNav)
   if (!isOpen) {
     return (
       <button
         onClick={onToggle}
-        className="fixed bottom-6 right-6 w-14 h-14 rounded-full bg-blue-600 text-white shadow-lg shadow-blue-600/25 hover:bg-blue-500 hover:shadow-blue-500/30 transition-all flex items-center justify-center z-50"
+        className="hidden md:flex fixed bottom-6 right-6 w-14 h-14 rounded-full bg-blue-600 text-white shadow-lg shadow-blue-600/25 hover:bg-blue-500 hover:shadow-blue-500/30 transition-all items-center justify-center z-50"
         aria-label="Open chat"
       >
         <svg className="w-6 h-6" viewBox="0 0 20 20" fill="currentColor">
@@ -176,7 +176,7 @@ export default function ChatPanel({ isOpen, onToggle }: ChatPanelProps) {
   }
 
   return (
-    <div className="w-[400px] shrink-0 flex flex-col bg-gray-900 border-l border-gray-800 h-full">
+    <div className="fixed inset-0 z-50 md:static md:z-auto md:w-[400px] shrink-0 flex flex-col bg-gray-900 border-l border-gray-800 h-full">
       {/* Header */}
       <div className="flex items-center justify-between h-14 px-4 border-b border-gray-800">
         <div className="flex items-center gap-2">
