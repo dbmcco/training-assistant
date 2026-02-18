@@ -1,8 +1,103 @@
-export default function Dashboard() {
+import { useQuery } from '@tanstack/react-query'
+import { fetchDashboardToday, fetchDashboardWeekly } from '../api/client'
+import BriefingBanner from '../components/dashboard/BriefingBanner'
+import ReadinessCard from '../components/dashboard/ReadinessCard'
+import MetricsRow from '../components/dashboard/MetricsRow'
+import TodayWorkout from '../components/dashboard/TodayWorkout'
+import RaceCountdown from '../components/dashboard/RaceCountdown'
+import WeeklyVolume from '../components/dashboard/WeeklyVolume'
+import LoadTrend from '../components/dashboard/LoadTrend'
+import AlertsList from '../components/dashboard/AlertsList'
+
+function SkeletonCard({ className = '' }: { className?: string }) {
   return (
-    <div className="p-6">
-      <h1 className="text-2xl font-bold mb-4">Dashboard</h1>
-      <p className="text-gray-400">Dashboard coming soon</p>
+    <div
+      className={`rounded-xl bg-gray-900 border border-gray-800 p-5 animate-pulse ${className}`}
+    >
+      <div className="h-3 w-24 bg-gray-800 rounded mb-4" />
+      <div className="h-8 w-16 bg-gray-800 rounded mb-2" />
+      <div className="h-2 w-full bg-gray-800 rounded" />
+    </div>
+  )
+}
+
+export default function Dashboard() {
+  const today = useQuery({
+    queryKey: ['dashboard', 'today'],
+    queryFn: fetchDashboardToday,
+  })
+
+  const weekly = useQuery({
+    queryKey: ['dashboard', 'weekly'],
+    queryFn: fetchDashboardWeekly,
+  })
+
+  if (today.isLoading) {
+    return (
+      <div className="p-6 space-y-6 max-w-6xl mx-auto">
+        <div className="h-12 w-full bg-gray-900 rounded-xl animate-pulse" />
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <SkeletonCard key={i} />
+          ))}
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <SkeletonCard className="h-52" />
+          <SkeletonCard className="h-52" />
+        </div>
+      </div>
+    )
+  }
+
+  if (today.isError) {
+    return (
+      <div className="p-6 max-w-6xl mx-auto">
+        <div className="rounded-xl bg-red-500/10 border border-red-500/20 p-5 text-sm text-red-400">
+          Failed to load dashboard data. Please try again later.
+        </div>
+      </div>
+    )
+  }
+
+  const data = today.data
+  if (!data) return null
+
+  return (
+    <div className="p-6 space-y-6 max-w-6xl mx-auto">
+      {/* Briefing Banner */}
+      {data.briefing && <BriefingBanner briefing={data.briefing} />}
+
+      {/* Metrics Row */}
+      <MetricsRow metrics={data.metrics} trainingStatus={data.training_status} />
+
+      {/* Two-column grid */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Left column */}
+        <div className="space-y-6">
+          <ReadinessCard readiness={data.readiness} />
+          {data.today_workout && <TodayWorkout workout={data.today_workout} />}
+          <RaceCountdown races={data.races} />
+        </div>
+
+        {/* Right column */}
+        <div className="space-y-6">
+          {weekly.data ? (
+            <>
+              <WeeklyVolume volume={weekly.data.volume} />
+              <LoadTrend loadTrend={weekly.data.load_trend} />
+            </>
+          ) : weekly.isLoading ? (
+            <>
+              <SkeletonCard className="h-64" />
+              <SkeletonCard className="h-64" />
+            </>
+          ) : null}
+
+          {data.briefing?.alerts && data.briefing.alerts.length > 0 && (
+            <AlertsList alerts={data.briefing.alerts} />
+          )}
+        </div>
+      </div>
     </div>
   )
 }

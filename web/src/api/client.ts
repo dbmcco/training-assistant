@@ -1,4 +1,15 @@
-import type { DashboardToday, Race, Conversation } from './types'
+import type {
+  DashboardToday,
+  DashboardWeekly,
+  Race,
+  Conversation,
+  PlannedWorkout,
+  Adherence,
+  AthleteProfile,
+  AthleteBiometrics,
+  PersonalRecord,
+  GearItem,
+} from './types'
 
 const BASE = '/api/v1'
 
@@ -8,9 +19,101 @@ export async function fetchDashboardToday(): Promise<DashboardToday> {
   return res.json()
 }
 
+export async function fetchDashboardWeekly(): Promise<DashboardWeekly> {
+  const res = await fetch(`${BASE}/dashboard/weekly`)
+  if (!res.ok) throw new Error(`Weekly dashboard fetch failed: ${res.status}`)
+  return res.json()
+}
+
 export async function fetchRaces(): Promise<Race[]> {
   const res = await fetch(`${BASE}/races`)
   if (!res.ok) throw new Error(`Races fetch failed: ${res.status}`)
+  return res.json()
+}
+
+export async function fetchPlanWorkouts(
+  startDate: string,
+  endDate: string,
+): Promise<PlannedWorkout[]> {
+  const res = await fetch(
+    `${BASE}/plan/workouts?start_date=${startDate}&end_date=${endDate}`,
+  )
+  if (!res.ok) throw new Error(`Plan workouts fetch failed: ${res.status}`)
+  return res.json()
+}
+
+export async function fetchPlanAdherence(
+  startDate: string,
+  endDate: string,
+): Promise<Adherence> {
+  const res = await fetch(
+    `${BASE}/plan/adherence?start=${startDate}&end=${endDate}`,
+  )
+  if (!res.ok) throw new Error(`Plan adherence fetch failed: ${res.status}`)
+  return res.json()
+}
+
+export async function createRace(data: {
+  name: string
+  date: string
+  distance_type: string
+  goal_time?: number | null
+  notes?: string | null
+}): Promise<Race> {
+  const res = await fetch(`${BASE}/races`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+  if (!res.ok) throw new Error(`Create race failed: ${res.status}`)
+  return res.json()
+}
+
+export async function updateRace(
+  id: string,
+  data: {
+    name?: string
+    date?: string
+    distance_type?: string
+    goal_time?: number | null
+    notes?: string | null
+  },
+): Promise<Race> {
+  const res = await fetch(`${BASE}/races/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+  if (!res.ok) throw new Error(`Update race failed: ${res.status}`)
+  return res.json()
+}
+
+export async function deleteRace(id: string): Promise<void> {
+  const res = await fetch(`${BASE}/races/${id}`, { method: 'DELETE' })
+  if (!res.ok) throw new Error(`Delete race failed: ${res.status}`)
+}
+
+export async function fetchAthleteProfile(): Promise<AthleteProfile> {
+  const res = await fetch(`${BASE}/athlete/profile`)
+  if (!res.ok) throw new Error(`Profile fetch failed: ${res.status}`)
+  return res.json()
+}
+
+export async function fetchAthleteBiometrics(): Promise<AthleteBiometrics> {
+  const res = await fetch(`${BASE}/athlete/biometrics`)
+  if (!res.ok) throw new Error(`Biometrics fetch failed: ${res.status}`)
+  return res.json()
+}
+
+export async function fetchAthleteRecords(): Promise<PersonalRecord[]> {
+  const res = await fetch(`${BASE}/athlete/records`)
+  if (!res.ok) throw new Error(`Records fetch failed: ${res.status}`)
+  return res.json()
+}
+
+export async function fetchAthleteGear(): Promise<GearItem[]> {
+  const res = await fetch(`${BASE}/athlete/gear`)
+  if (!res.ok) throw new Error(`Gear fetch failed: ${res.status}`)
   return res.json()
 }
 
