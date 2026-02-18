@@ -14,6 +14,7 @@ export default defineConfig({
   preview: {
     host: '0.0.0.0',
     port: 4100,
+    allowedHosts: ['bmbp.tail277a09.ts.net'],
     proxy: {
       '/api': 'http://localhost:8000',
     },
