@@ -7,6 +7,7 @@ from src.routers.races import router as races_router
 from src.routers.plan import router as plan_router
 from src.routers.activities import router as activities_router
 from src.routers.athlete import router as athlete_router
+from src.routers.readiness import router as readiness_router
 
 app = FastAPI(title="Training Assistant API", version="0.1.0")
 
@@ -24,6 +25,7 @@ app.include_router(races_router)
 app.include_router(plan_router)
 app.include_router(activities_router)
 app.include_router(athlete_router)
+app.include_router(readiness_router)
 
 
 @app.get("/health")
