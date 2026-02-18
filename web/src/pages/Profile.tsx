@@ -64,13 +64,13 @@ function BiometricsSection({
 
   return (
     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-      <BiometricCard label="Weight" value={biometrics.weight} unit="kg" />
-      <BiometricCard label="Body Fat" value={biometrics.body_fat} unit="%" />
-      <BiometricCard label="Muscle Mass" value={biometrics.muscle_mass} unit="kg" />
+      <BiometricCard label="Weight" value={biometrics.weight_kg} unit="kg" />
+      <BiometricCard label="Body Fat" value={biometrics.body_fat_pct} unit="%" />
+      <BiometricCard label="Muscle Mass" value={biometrics.muscle_mass_kg} unit="kg" />
       <BiometricCard label="BMI" value={biometrics.bmi} />
       <BiometricCard label="Fitness Age" value={biometrics.fitness_age} unit="yrs" />
-      <BiometricCard label="LT Heart Rate" value={biometrics.lt_hr} unit="bpm" />
-      <BiometricCard label="LT Pace" value={biometrics.lt_pace} unit="/km" />
+      <BiometricCard label="LT Heart Rate" value={biometrics.lactate_threshold_hr} unit="bpm" />
+      <BiometricCard label="LT Pace" value={biometrics.lactate_threshold_pace} unit="/km" />
       <BiometricCard label="Cycling FTP" value={biometrics.cycling_ftp} unit="W" />
     </div>
   )
@@ -128,12 +128,11 @@ function RecordsSection({
                 {record.record_type.replace(/_/g, ' ')}
               </td>
               <td className="px-4 py-3 text-right text-gray-100 font-medium">
-                {record.value}{' '}
-                <span className="text-gray-500 text-xs">{record.unit}</span>
+                {record.value}
               </td>
               <td className="px-4 py-3 text-right text-gray-500">
-                {record.date
-                  ? new Date(record.date + 'T00:00:00').toLocaleDateString('en-US', {
+                {record.recorded_at
+                  ? new Date(record.recorded_at).toLocaleDateString('en-US', {
                       month: 'short',
                       day: 'numeric',
                       year: 'numeric',
@@ -184,7 +183,7 @@ function GearSection({
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
       {gear.map((item) => {
-        const icon = gearTypeIcons[item.type.toLowerCase()] ?? '\u{1F3CB}'
+        const icon = gearTypeIcons[item.gear_type.toLowerCase()] ?? '\u{1F3CB}'
         return (
           <div
             key={item.id}
@@ -197,13 +196,13 @@ function GearSection({
                   {item.name}
                 </h4>
                 <p className="text-xs text-gray-500">
-                  {[item.brand, item.model].filter(Boolean).join(' ') || item.type}
+                  {[item.brand, item.model].filter(Boolean).join(' ') || item.gear_type}
                 </p>
                 <div className="flex items-center gap-4 mt-2 text-xs text-gray-500">
-                  {item.total_distance != null && (
+                  {item.total_distance_km != null && (
                     <span>
                       <span className="text-gray-300 font-medium">
-                        {item.total_distance.toLocaleString()}
+                        {Math.round(item.total_distance_km).toLocaleString()}
                       </span>{' '}
                       km
                     </span>
@@ -258,14 +257,10 @@ export default function Profile() {
           </div>
         ) : profile ? (
           <>
-            <h1 className="text-2xl font-bold">{profile.name}</h1>
-            <div className="flex items-center gap-4 mt-1 text-sm text-gray-500">
-              {profile.email && <span>{profile.email}</span>}
-              {profile.age != null && <span>Age {profile.age}</span>}
-              {profile.gender && (
-                <span className="capitalize">{profile.gender}</span>
-              )}
-            </div>
+            <h1 className="text-2xl font-bold">Profile</h1>
+            {profile.goals && (
+              <p className="text-sm text-gray-400 mt-1">{profile.goals}</p>
+            )}
           </>
         ) : (
           <h1 className="text-2xl font-bold">Profile</h1>

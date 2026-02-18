@@ -118,40 +118,45 @@ export interface PlannedWorkout {
 
 export interface AthleteProfile {
   id: string
-  name: string
-  email: string | null
-  age: number | null
-  gender: string | null
-  created_at: string
+  notes: Record<string, unknown> | null
+  goals: string | null
+  injury_history: string | null
+  preferences: Record<string, unknown> | null
+  updated_at: string | null
 }
 
 export interface AthleteBiometrics {
-  weight: number | null
-  body_fat: number | null
-  muscle_mass: number | null
+  id: string
+  date: string | null
+  weight_kg: number | null
+  body_fat_pct: number | null
+  muscle_mass_kg: number | null
   bmi: number | null
   fitness_age: number | null
-  lt_hr: number | null
-  lt_pace: string | null
+  actual_age: number | null
+  lactate_threshold_hr: number | null
+  lactate_threshold_pace: string | null
   cycling_ftp: number | null
-  updated_at: string | null
 }
 
 export interface PersonalRecord {
   id: string
-  activity_type: string
   record_type: string
+  activity_type: string
   value: number
-  unit: string
-  date: string | null
+  activity_id: number | null
+  recorded_at: string | null
 }
 
 export interface GearItem {
   id: string
-  name: string
-  type: string
+  garmin_gear_uuid: string
+  name: string | null
+  gear_type: string
   brand: string | null
   model: string | null
-  total_distance: number | null
+  date_begin: string | null
+  max_distance_km: number | null
+  total_distance_km: number | null
   total_activities: number | null
 }
