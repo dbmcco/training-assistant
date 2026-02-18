@@ -29,6 +29,8 @@ export interface RaceInfo {
 
 export interface Briefing {
   content: string
+  readiness_summary: string | null
+  workout_recommendation: string | null
   alerts: string[] | null
 }
 

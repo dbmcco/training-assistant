@@ -1,5 +1,6 @@
-import { useQuery } from '@tanstack/react-query'
-import { fetchDashboardToday, fetchDashboardWeekly } from '../api/client'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { fetchDashboardToday, fetchDashboardWeekly, generateBriefing } from '../api/client'
+import type { Briefing } from '../api/types'
 import BriefingBanner from '../components/dashboard/BriefingBanner'
 import ReadinessCard from '../components/dashboard/ReadinessCard'
 import MetricsRow from '../components/dashboard/MetricsRow'
@@ -22,6 +23,8 @@ function SkeletonCard({ className = '' }: { className?: string }) {
 }
 
 export default function Dashboard() {
+  const queryClient = useQueryClient()
+
   const today = useQuery({
     queryKey: ['dashboard', 'today'],
     queryFn: fetchDashboardToday,
@@ -30,6 +33,15 @@ export default function Dashboard() {
   const weekly = useQuery({
     queryKey: ['dashboard', 'weekly'],
     queryFn: fetchDashboardWeekly,
+  })
+
+  const briefingMutation = useMutation({
+    mutationFn: generateBriefing,
+    onSuccess: (briefing: Briefing) => {
+      queryClient.setQueryData(['dashboard', 'today'], (old: typeof today.data) =>
+        old ? { ...old, briefing } : old,
+      )
+    },
   })
 
   if (today.isLoading) {
@@ -65,7 +77,22 @@ export default function Dashboard() {
   return (
     <div className="p-6 space-y-6 max-w-6xl mx-auto">
       {/* Briefing Banner */}
-      {data.briefing && <BriefingBanner briefing={data.briefing} />}
+      {data.briefing ? (
+        <BriefingBanner briefing={data.briefing} />
+      ) : (
+        <button
+          onClick={() => briefingMutation.mutate()}
+          disabled={briefingMutation.isPending}
+          className="w-full rounded-xl bg-gray-900 border border-gray-800 px-5 py-3 text-left hover:bg-gray-800/40 transition-colors flex items-center gap-2 disabled:opacity-50"
+        >
+          <svg className="w-5 h-5 text-blue-400 shrink-0" viewBox="0 0 20 20" fill="currentColor">
+            <path d="M11 3a1 1 0 10-2 0v1a1 1 0 102 0V3zM15.657 5.757a1 1 0 00-1.414-1.414l-.707.707a1 1 0 001.414 1.414l.707-.707zM18 10a1 1 0 01-1 1h-1a1 1 0 110-2h1a1 1 0 011 1zM5.05 6.464A1 1 0 106.464 5.05l-.707-.707a1 1 0 00-1.414 1.414l.707.707zM5 10a1 1 0 01-1 1H3a1 1 0 110-2h1a1 1 0 011 1zM8 16v-1h4v1a2 2 0 11-4 0zM12 14c.015-.34.208-.646.477-.859a4 4 0 10-4.954 0c.27.213.462.519.476.859h4.002z" />
+          </svg>
+          <span className="text-sm font-semibold text-gray-100">
+            {briefingMutation.isPending ? 'Generating briefing...' : 'Generate Morning Briefing'}
+          </span>
+        </button>
+      )}
 
       {/* Metrics Row */}
       <MetricsRow metrics={data.metrics} trainingStatus={data.training_status} />

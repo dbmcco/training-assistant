@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db.connection import get_db
 from src.db.models import DailyBriefing
+from src.services.briefing import generate_briefing
 
 router = APIRouter(prefix="/api/v1/briefings", tags=["briefings"])
 
@@ -33,6 +34,12 @@ async def latest_briefing(db: AsyncSession = Depends(get_db)):
     if not briefing:
         return None
     return _briefing_to_dict(briefing)
+
+
+@router.post("/generate")
+async def generate_daily_briefing(db: AsyncSession = Depends(get_db)):
+    """Generate today's briefing (idempotent — returns existing if already generated)."""
+    return await generate_briefing(db)
 
 
 @router.get("")

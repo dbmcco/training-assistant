@@ -1,4 +1,5 @@
 import type {
+  Briefing,
   DashboardToday,
   DashboardWeekly,
   Race,
@@ -149,6 +150,12 @@ export async function fetchAthleteRecords(): Promise<PersonalRecord[]> {
 export async function fetchAthleteGear(): Promise<GearItem[]> {
   const res = await fetch(`${BASE}/athlete/gear`)
   if (!res.ok) throw new Error(`Gear fetch failed: ${res.status}`)
+  return res.json()
+}
+
+export async function generateBriefing(): Promise<Briefing> {
+  const res = await fetch(`${BASE}/briefings/generate`, { method: 'POST' })
+  if (!res.ok) throw new Error(`Briefing generation failed: ${res.status}`)
   return res.json()
 }
 
