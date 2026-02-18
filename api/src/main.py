@@ -5,6 +5,7 @@ from src.config import settings
 from src.routers.dashboard import router as dashboard_router
 from src.routers.races import router as races_router
 from src.routers.plan import router as plan_router
+from src.routers.activities import router as activities_router
 
 app = FastAPI(title="Training Assistant API", version="0.1.0")
 
@@ -20,6 +21,7 @@ app.add_middleware(
 app.include_router(dashboard_router)
 app.include_router(races_router)
 app.include_router(plan_router)
+app.include_router(activities_router)
 
 
 @app.get("/health")
