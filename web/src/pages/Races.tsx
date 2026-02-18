@@ -15,7 +15,9 @@ const DISTANCE_TYPES = [
   { value: 'marathon', label: 'Marathon' },
   { value: 'sprint_tri', label: 'Sprint Triathlon' },
   { value: 'olympic_tri', label: 'Olympic Triathlon' },
+  { value: '70.3', label: '70.3' },
   { value: 'half_ironman', label: 'Half Ironman' },
+  { value: '140.6', label: '140.6' },
   { value: 'ironman', label: 'Ironman' },
   { value: 'other', label: 'Other' },
 ] as const
