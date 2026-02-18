@@ -39,7 +39,7 @@ export async function fetchDashboardWeekly(): Promise<DashboardWeekly> {
     total: adh.total_planned ?? adh.total ?? 0,
     completed: adh.completed ?? 0,
     missed: adh.missed ?? 0,
-    rate: adh.completion_pct ?? adh.rate ?? 0,
+    rate: adh.completion_pct != null ? adh.completion_pct / 100 : adh.rate ?? 0,
   }
 
   const load_trend = (raw.load_trend ?? []).map(
@@ -78,7 +78,14 @@ export async function fetchPlanAdherence(
     `${BASE}/plan/adherence?start=${startDate}&end=${endDate}`,
   )
   if (!res.ok) throw new Error(`Plan adherence fetch failed: ${res.status}`)
-  return res.json()
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const raw: any = await res.json()
+  return {
+    total: raw.total_planned ?? raw.total ?? 0,
+    completed: raw.completed ?? 0,
+    missed: raw.missed ?? 0,
+    rate: raw.completion_pct != null ? raw.completion_pct / 100 : raw.rate ?? 0,
+  }
 }
 
 export async function createRace(data: {

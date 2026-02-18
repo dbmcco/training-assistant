@@ -87,7 +87,7 @@ export default function ReadinessCard({ readiness }: ReadinessCardProps) {
                   />
                 </div>
                 <span className="text-gray-300 w-6 text-right">
-                  {c.normalized}
+                  {Math.round(c.normalized)}
                 </span>
               </div>
             </div>
