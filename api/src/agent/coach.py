@@ -42,7 +42,7 @@ client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
 async def _build_dynamic_context(db: AsyncSession) -> dict:
     """Query DB to build dynamic athlete context for system prompt injection."""
 
-    # A-race
+    # Races — find A-race by priority, not just first by date
     race_result = await db.execute(
         select(Race).where(Race.date >= date.today()).order_by(Race.date)
     )
@@ -50,10 +50,18 @@ async def _build_dynamic_context(db: AsyncSession) -> dict:
     a_race = None
     race_list = []
     for r in races:
-        rd = {"name": r.name, "date": r.date, "distance_type": r.distance_type}
+        rd = {
+            "name": r.name,
+            "date": r.date,
+            "distance_type": r.distance_type,
+            "priority": getattr(r, "priority", "B") or "B",
+        }
         race_list.append(rd)
-        if a_race is None:
+        if rd["priority"].upper() == "A" and a_race is None:
             a_race = rd
+    # Fallback: if no A-race flagged, use the last race (biggest)
+    if a_race is None and race_list:
+        a_race = race_list[-1]
 
     # Phase detection
     phase = None

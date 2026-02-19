@@ -34,19 +34,23 @@ Load: {load}
 Races: {races}
 Recent activities: {recent}
 
+RACE CONTEXT:
+Races are marked A (primary goal), B (supporting), or C (fun/low priority).
+Everything filters through the A-race. B-races exist to sharpen fitness, test pacing, and build race experience FOR the A-race. When you mention a B-race, say what it tests or builds toward the A-race — don't treat it as its own isolated goal. Today's training matters because of where it sits relative to the A-race timeline.
+
 Respond in exactly this JSON. No markdown fences, no extra text outside the JSON.
 
 RULES:
 - NO markdown anywhere. No **bold**, no *italic*, no headers, no bullet syntax. Plain text only.
 - Each field has a different job. Do NOT repeat information across fields.
-- "content" is the headline — what matters most today in 1-2 short sentences. Not a recap of everything.
+- "content" is the headline — what matters most today in 1-2 short sentences. Frame through the A-race lens.
 - "readiness_summary" is recovery state only — score, key signal, one-word call (push/moderate/easy/rest).
 - "workout_recommendation" is about today's workout only — confirm it, adjust it, or swap it. One sentence.
 - "alerts" are only for genuine concerns. Not restatements of the briefing. Empty array if nothing is wrong.
 - Reference numbers, not vibes. Keep it tight enough to scan on a phone.
 
 {{
-  "content": "1-2 sentences. The one thing to know today.",
+  "content": "1-2 sentences. The one thing to know today, framed by A-race goal.",
   "readiness_summary": "Score and call. e.g. Readiness 78 — HRV up, sleep weak. Moderate.",
   "workout_recommendation": "Confirm, adjust, or swap today's session. One sentence.",
   "alerts": ["short, specific concern if any"]
@@ -153,17 +157,32 @@ async def gather_context(db: AsyncSession) -> dict:
             load_parts.append(f"Acute:Chronic ratio: {acr:.2f}")
         load_text = ", ".join(load_parts)
 
-    # Races
+    # Races (with priority context)
     race_result = await db.execute(
         select(Race).where(Race.date >= today).order_by(Race.date)
     )
     races = race_result.scalars().all()
+    a_race = None
     if races:
         race_lines = []
         for r in races:
             days = (r.date - today).days
             weeks = days // 7
-            race_lines.append(f"{r.name} ({r.distance_type}): {r.date} — {weeks}w {days % 7}d out")
+            prio = (r.priority or "B").upper()
+            if prio == "A":
+                a_race = r
+            role = ""
+            if prio == "B" and a_race is None:
+                # B-race before A-race found — it serves the A-race
+                role = " [B-race, fitness check for A-race]"
+            elif prio == "B":
+                role = f" [B-race, prep for {a_race.name}]"
+            elif prio == "A":
+                role = " [A-RACE — primary goal]"
+            race_lines.append(
+                f"{prio}-race: {r.name} ({r.distance_type}): {r.date} — {weeks}w {days % 7}d out{role}"
+            )
+        # Re-sort so A-race context comes first if found
         races_text = "\n".join(race_lines)
     else:
         races_text = "No upcoming races."

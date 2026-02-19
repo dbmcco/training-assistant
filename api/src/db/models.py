@@ -100,6 +100,7 @@ class Race(Base):
     date = Column(Date, nullable=False)
     distance_type = Column(Text, nullable=False)
     goal_time = Column(Integer)
+    priority = Column(Text, default="B")
     notes = Column(Text)
     created_at = Column(TIMESTAMP(timezone=True))
 
