@@ -10,6 +10,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db.models import (
+    AlertLog,
+    AthleteBiometrics,
     AthleteProfile,
     GarminActivity,
     GarminDailySummary,
@@ -187,6 +189,75 @@ TOOL_DEFINITIONS: list[dict] = [
             "required": ["key", "note"],
         },
     },
+    {
+        "name": "get_discipline_distribution",
+        "description": (
+            "Get swim/bike/run training time distribution over a period. "
+            "Shows hours and percentage per discipline, useful for checking "
+            "if training balance matches race demands (e.g. 70.3 targets: "
+            "~25% swim, 40% bike, 30% run)."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "days_back": {
+                    "type": "integer",
+                    "description": "Number of days to analyze.",
+                    "default": 28,
+                },
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "get_fitness_trends",
+        "description": (
+            "Get fitness trend data over time including VO2 max (run and cycling), "
+            "training load, HRV averages, body battery, sleep scores, endurance score, "
+            "and race predictions. Useful for assessing fitness trajectory."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "days_back": {
+                    "type": "integer",
+                    "description": "Number of days of trend data.",
+                    "default": 60,
+                },
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "get_biometrics",
+        "description": (
+            "Get the athlete's latest biometric data including weight, body fat, "
+            "FTP, lactate threshold HR and pace, fitness age, and VO2 max details."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    },
+    {
+        "name": "get_active_alerts",
+        "description": (
+            "Get unacknowledged proactive alerts including recovery warnings, "
+            "coaching insights, and race countdown milestones."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum number of alerts to return.",
+                    "default": 10,
+                },
+            },
+            "required": [],
+        },
+    },
 ]
 
 
@@ -211,6 +282,10 @@ async def execute_tool(name: str, args: dict, db: AsyncSession) -> str:
         "get_training_load": _get_training_load,
         "modify_workout": _modify_workout,
         "update_athlete_profile": _update_athlete_profile,
+        "get_discipline_distribution": _get_discipline_distribution,
+        "get_fitness_trends": _get_fitness_trends,
+        "get_biometrics": _get_biometrics,
+        "get_active_alerts": _get_active_alerts,
     }
 
     handler = handlers.get(name)
@@ -485,3 +560,182 @@ async def _update_athlete_profile(db: AsyncSession, key: str, note: str) -> str:
 
     await db.commit()
     return f"Saved observation — {key}: {note}"
+
+
+async def _get_discipline_distribution(
+    db: AsyncSession, days_back: int = 28
+) -> str:
+    from src.services.analytics import weekly_volume_by_discipline
+
+    cutoff = date.today() - timedelta(days=days_back)
+    volumes = await weekly_volume_by_discipline(db, cutoff, date.today())
+
+    if not volumes:
+        return "No activity data found for the given period."
+
+    # Compute totals and percentages
+    total_hours = sum(v["hours"] for v in volumes.values()) or 1.0
+    lines = [f"Discipline Distribution (last {days_back} days):"]
+    for disc in ["swim", "run", "bike", "strength", "cross_training", "other"]:
+        if disc in volumes:
+            v = volumes[disc]
+            pct = round(v["hours"] / total_hours * 100, 1)
+            lines.append(
+                f"  - {disc}: {v['hours']:.1f}h ({pct}%) — "
+                f"{v['distance_km']:.1f}km, {v['count']} sessions"
+            )
+
+    lines.append(f"  Total: {total_hours:.1f} hours")
+
+    # Add 70.3 target comparison
+    target = {"swim": 25, "bike": 40, "run": 30}
+    lines.append("\n70.3 Target vs Actual:")
+    for disc, target_pct in target.items():
+        actual_pct = round(
+            volumes.get(disc, {}).get("hours", 0) / total_hours * 100, 1
+        )
+        delta = actual_pct - target_pct
+        indicator = "✓" if abs(delta) < 10 else ("↑" if delta > 0 else "↓")
+        lines.append(
+            f"  - {disc}: {actual_pct:.0f}% actual vs {target_pct}% target {indicator}"
+        )
+
+    return "\n".join(lines)
+
+
+async def _get_fitness_trends(db: AsyncSession, days_back: int = 60) -> str:
+    cutoff = date.today() - timedelta(days=days_back)
+    result = await db.execute(
+        select(GarminDailySummary)
+        .where(GarminDailySummary.calendar_date >= cutoff)
+        .order_by(GarminDailySummary.calendar_date.asc())
+    )
+    summaries = result.scalars().all()
+
+    if not summaries:
+        return "No daily summary data found for the given period."
+
+    # Get first and last for deltas
+    first = summaries[0]
+    last = summaries[-1]
+
+    lines = [f"Fitness Trends ({days_back} days, {first.calendar_date} to {last.calendar_date}):"]
+
+    # VO2 max
+    if last.vo2_max_run is not None:
+        delta = ""
+        if first.vo2_max_run is not None:
+            d = last.vo2_max_run - first.vo2_max_run
+            delta = f" ({d:+.1f})" if d != 0 else " (stable)"
+        lines.append(f"  VO2 max (run): {last.vo2_max_run}{delta}")
+
+    if last.vo2_max_cycling is not None:
+        delta = ""
+        if first.vo2_max_cycling is not None:
+            d = last.vo2_max_cycling - first.vo2_max_cycling
+            delta = f" ({d:+.1f})" if d != 0 else " (stable)"
+        lines.append(f"  VO2 max (cycling): {last.vo2_max_cycling}{delta}")
+
+    # Endurance score
+    if last.endurance_score is not None:
+        lines.append(f"  Endurance score: {last.endurance_score}")
+
+    # Training load
+    if last.training_load_7d is not None:
+        lines.append(f"  Training load 7d: {last.training_load_7d:.0f}")
+    if last.training_load_28d is not None:
+        lines.append(f"  Training load 28d: {last.training_load_28d:.0f}")
+
+    # HRV trend
+    if last.hrv_7d_avg is not None:
+        delta = ""
+        if first.hrv_7d_avg is not None:
+            d = last.hrv_7d_avg - first.hrv_7d_avg
+            delta = f" ({d:+d}ms)" if d != 0 else " (stable)"
+        lines.append(f"  HRV 7d avg: {last.hrv_7d_avg}ms{delta}")
+
+    # RHR trend
+    if last.resting_heart_rate is not None:
+        delta = ""
+        if first.resting_heart_rate is not None:
+            d = last.resting_heart_rate - first.resting_heart_rate
+            delta = f" ({d:+d}bpm)" if d != 0 else " (stable)"
+        lines.append(f"  Resting HR: {last.resting_heart_rate}bpm{delta}")
+
+    # Race predictions
+    preds = []
+    if last.race_prediction_5k_seconds:
+        m, s = divmod(last.race_prediction_5k_seconds, 60)
+        preds.append(f"5K: {m}:{s:02d}")
+    if last.race_prediction_10k_seconds:
+        m, s = divmod(last.race_prediction_10k_seconds, 60)
+        preds.append(f"10K: {m}:{s:02d}")
+    if last.race_prediction_half_seconds:
+        h = last.race_prediction_half_seconds // 3600
+        m = (last.race_prediction_half_seconds % 3600) // 60
+        preds.append(f"HM: {h}:{m:02d}")
+    if last.race_prediction_marathon_seconds:
+        h = last.race_prediction_marathon_seconds // 3600
+        m = (last.race_prediction_marathon_seconds % 3600) // 60
+        preds.append(f"Marathon: {h}:{m:02d}")
+    if preds:
+        lines.append(f"  Race predictions: {', '.join(preds)}")
+
+    # Training status
+    if last.training_status:
+        lines.append(f"  Training status: {last.training_status}")
+
+    return "\n".join(lines)
+
+
+async def _get_biometrics(db: AsyncSession) -> str:
+    result = await db.execute(
+        select(AthleteBiometrics)
+        .order_by(AthleteBiometrics.date.desc())
+        .limit(1)
+    )
+    bio = result.scalar_one_or_none()
+
+    if not bio:
+        return "No biometric data available."
+
+    lines = [f"Latest Biometrics (as of {bio.date}):"]
+    if bio.weight_kg is not None:
+        lines.append(f"  Weight: {bio.weight_kg:.1f} kg")
+    if bio.body_fat_pct is not None:
+        lines.append(f"  Body fat: {bio.body_fat_pct:.1f}%")
+    if bio.muscle_mass_kg is not None:
+        lines.append(f"  Muscle mass: {bio.muscle_mass_kg:.1f} kg")
+    if bio.bmi is not None:
+        lines.append(f"  BMI: {bio.bmi:.1f}")
+    if bio.fitness_age is not None:
+        lines.append(f"  Fitness age: {bio.fitness_age}")
+    if bio.cycling_ftp is not None:
+        lines.append(f"  Cycling FTP: {bio.cycling_ftp}W")
+    if bio.lactate_threshold_hr is not None:
+        lines.append(f"  Lactate threshold HR: {bio.lactate_threshold_hr} bpm")
+    if bio.lactate_threshold_pace is not None:
+        # pace is stored as seconds per km
+        m, s = divmod(int(bio.lactate_threshold_pace), 60)
+        lines.append(f"  Lactate threshold pace: {m}:{s:02d}/km")
+
+    return "\n".join(lines)
+
+
+async def _get_active_alerts(db: AsyncSession, limit: int = 10) -> str:
+    result = await db.execute(
+        select(AlertLog)
+        .where(AlertLog.acknowledged == False)  # noqa: E712
+        .order_by(AlertLog.created_at.desc())
+        .limit(limit)
+    )
+    alerts = result.scalars().all()
+
+    if not alerts:
+        return "No active alerts."
+
+    lines = [f"Active Alerts ({len(alerts)}):"]
+    for a in alerts:
+        lines.append(f"  - [{a.severity}] {a.title}: {a.message or ''}")
+
+    return "\n".join(lines)

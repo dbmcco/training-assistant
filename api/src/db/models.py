@@ -2,6 +2,7 @@ from uuid import uuid4
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     Column,
     Date,
     Float,
@@ -241,3 +242,16 @@ class AthleteProfile(Base):
     injury_history = Column(Text)
     preferences = Column(Text)
     updated_at = Column(TIMESTAMP(timezone=True))
+
+
+class AlertLog(Base):
+    __tablename__ = "alert_log"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    alert_type = Column(Text, nullable=False)
+    severity = Column(Text, nullable=False)
+    title = Column(Text, nullable=False)
+    message = Column(Text)
+    data = Column(JSONB)
+    acknowledged = Column(Boolean, default=False)
+    created_at = Column(TIMESTAMP(timezone=True))
