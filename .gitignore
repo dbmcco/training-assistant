@@ -1,0 +1,39 @@
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
+
+# Workspace helper artifacts
+.amplifier/
+.workgraph/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage/
+htmlcov/
+*.egg-info/
+*.log
+
+# Virtual environments
+.venv/
+api/.venv/
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Node
+node_modules/
+web/node_modules/
+web/dist/
+dist/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
