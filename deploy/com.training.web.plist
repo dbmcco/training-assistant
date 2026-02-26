@@ -6,16 +6,10 @@
     <string>com.training.web</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/Users/braydon/.nvm/versions/node/v22.22.0/bin/npx</string>
-        <string>vite</string>
-        <string>preview</string>
-        <string>--host</string>
-        <string>0.0.0.0</string>
-        <string>--port</string>
-        <string>4100</string>
+        <string>/bin/zsh</string>
+        <string>-lc</string>
+        <string>cd "$HOME/projects/experiments/training-assistant/web" &amp;&amp; exec "$HOME/projects/experiments/training-assistant/web/node_modules/.bin/vite" --host 0.0.0.0 --port 4100 --strictPort</string>
     </array>
-    <key>WorkingDirectory</key>
-    <string>/Users/braydon/projects/experiments/training-assistant/web</string>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
@@ -27,7 +21,7 @@
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
-        <string>/Users/braydon/.nvm/versions/node/v22.22.0/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
     </dict>
 </dict>
 </plist>

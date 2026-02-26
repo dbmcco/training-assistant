@@ -6,15 +6,10 @@
     <string>com.training.api</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/Users/braydon/projects/experiments/training-assistant/api/.venv/bin/uvicorn</string>
-        <string>src.main:app</string>
-        <string>--host</string>
-        <string>0.0.0.0</string>
-        <string>--port</string>
-        <string>8000</string>
+        <string>/bin/zsh</string>
+        <string>-lc</string>
+        <string>cd "$HOME/projects/experiments/training-assistant/api" &amp;&amp; exec "$HOME/projects/experiments/training-assistant/api/.venv/bin/uvicorn" src.main:app --host 0.0.0.0 --port 8000 --workers 2</string>
     </array>
-    <key>WorkingDirectory</key>
-    <string>/Users/braydon/projects/experiments/training-assistant/api</string>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
@@ -26,7 +21,7 @@
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
-        <string>/Users/braydon/projects/experiments/training-assistant/api/.venv/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
     </dict>
 </dict>
 </plist>

@@ -4,7 +4,7 @@
 
 **Goal:** Build an API-first training coach with Claude Agent SDK, comprehensive Garmin sync, React dashboard, and proactive daily briefings.
 
-**Architecture:** Python FastAPI API (all business logic, AI agent, data) + React Vite frontend (thin consumer). Shared PostgreSQL `assistant` database at `postgresql://braydon@localhost:5432/assistant`. Enhanced garmin-connect-sync for comprehensive data ingestion.
+**Architecture:** Python FastAPI API (all business logic, AI agent, data) + React Vite frontend (thin consumer). Shared PostgreSQL `assistant` database at `postgresql://<db-user>:5432/assistant`. Enhanced garmin-connect-sync for comprehensive data ingestion.
 
 **Tech Stack:** Python 3.14 + uv, FastAPI, Claude Agent SDK, SQLAlchemy + Alembic, asyncpg. React 19 + Vite + TypeScript, Recharts, TanStack Query, Tailwind CSS.
 
@@ -27,7 +27,7 @@
 **Step 1: Initialize Python project with uv**
 
 ```bash
-cd /Users/braydon/projects/experiments/training-assistant
+cd /Users/<local-user>/projects/experiments/training-assistant
 mkdir -p api/src api/tests
 cd api
 uv init --no-readme
@@ -36,7 +36,7 @@ uv init --no-readme
 **Step 2: Add dependencies**
 
 ```bash
-cd /Users/braydon/projects/experiments/training-assistant/api
+cd /Users/<local-user>/projects/experiments/training-assistant/api
 uv add fastapi uvicorn[standard] sqlalchemy[asyncio] asyncpg alembic pydantic-settings python-dotenv sse-starlette
 uv add --dev pytest pytest-asyncio httpx
 ```
@@ -48,7 +48,7 @@ uv add --dev pytest pytest-asyncio httpx
 from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
-    database_url: str = "postgresql+asyncpg://braydon@localhost:5432/assistant"
+    database_url: str = "postgresql+asyncpg://<db-user>:5432/assistant"
     anthropic_api_key: str = ""
     coach_model: str = "claude-sonnet-4-6"
     cors_origins: list[str] = ["http://localhost:5173"]
@@ -100,7 +100,7 @@ async def test_health():
 **Step 6: Run test**
 
 ```bash
-cd /Users/braydon/projects/experiments/training-assistant/api
+cd /Users/<local-user>/projects/experiments/training-assistant/api
 uv run pytest tests/test_health.py -v
 ```
 
@@ -110,14 +110,14 @@ Expected: PASS
 
 ```bash
 # api/.env
-DATABASE_URL=postgresql+asyncpg://braydon@localhost:5432/assistant
+DATABASE_URL=postgresql+asyncpg://<db-user>:5432/assistant
 ANTHROPIC_API_KEY=<from existing config>
 ```
 
 **Step 8: Verify server starts**
 
 ```bash
-cd /Users/braydon/projects/experiments/training-assistant/api
+cd /Users/<local-user>/projects/experiments/training-assistant/api
 uv run uvicorn src.main:app --port 8000
 # Visit http://localhost:8000/health -> {"status": "ok"}
 # Visit http://localhost:8000/docs -> Swagger UI
@@ -383,7 +383,7 @@ async def test_can_read_garmin_daily_summary():
 **Step 4: Run tests**
 
 ```bash
-cd /Users/braydon/projects/experiments/training-assistant/api
+cd /Users/<local-user>/projects/experiments/training-assistant/api
 uv run pytest tests/test_db.py -v
 ```
 
@@ -408,13 +408,13 @@ git commit -m "feat: database connection and SQLAlchemy models"
 **Step 1: Initialize Alembic**
 
 ```bash
-cd /Users/braydon/projects/experiments/training-assistant/api
+cd /Users/<local-user>/projects/experiments/training-assistant/api
 uv run alembic init src/db/migrations
 ```
 
 **Step 2: Configure alembic.ini**
 
-Edit `alembic.ini`: set `sqlalchemy.url = postgresql://braydon@localhost:5432/assistant`
+Edit `alembic.ini`: set `sqlalchemy.url = postgresql://<db-user>:5432/assistant`
 
 **Step 3: Edit migrations/env.py**
 
@@ -437,7 +437,7 @@ uv run alembic upgrade head
 **Step 6: Verify tables exist**
 
 ```bash
-/opt/homebrew/Cellar/postgresql@17/17.7_1/bin/psql -U braydon -d assistant -c '\dt races'
+/opt/homebrew/Cellar/postgresql@17/17.7_1/bin/psql -U <db-user> -d assistant -c '\dt races'
 ```
 
 Expected: table listed
@@ -456,8 +456,8 @@ git commit -m "feat: Alembic migrations for training assistant tables"
 ### Task 4: Comprehensive Sync — Athlete Biometrics (Tier 1)
 
 **Files:**
-- Modify: `/Users/braydon/projects/experiments/garmin-connect-sync/sync.py`
-- Modify: `/Users/braydon/projects/experiments/garmin-connect-sync/schema.sql`
+- Modify: `/Users/<local-user>/projects/experiments/garmin-connect-sync/sync.py`
+- Modify: `/Users/<local-user>/projects/experiments/garmin-connect-sync/schema.sql`
 
 **Step 1: Add `athlete_biometrics` table to schema.sql**
 
@@ -593,20 +593,20 @@ if comprehensive:
 **Step 4: Test manually**
 
 ```bash
-cd /Users/braydon/projects/experiments/garmin-connect-sync
+cd /Users/<local-user>/projects/experiments/garmin-connect-sync
 source .venv/bin/activate
 python sync.py --comprehensive --days-back 1
 ```
 
 Verify biometrics row created:
 ```bash
-/opt/homebrew/Cellar/postgresql@17/17.7_1/bin/psql -U braydon -d assistant -c "SELECT date, weight_kg, fitness_age, cycling_ftp FROM athlete_biometrics ORDER BY date DESC LIMIT 1"
+/opt/homebrew/Cellar/postgresql@17/17.7_1/bin/psql -U <db-user> -d assistant -c "SELECT date, weight_kg, fitness_age, cycling_ftp FROM athlete_biometrics ORDER BY date DESC LIMIT 1"
 ```
 
 **Step 5: Commit**
 
 ```bash
-cd /Users/braydon/projects/experiments/garmin-connect-sync
+cd /Users/<local-user>/projects/experiments/garmin-connect-sync
 git add sync.py schema.sql
 git commit -m "feat: add comprehensive biometrics sync (Tier 1)"
 ```
@@ -616,8 +616,8 @@ git commit -m "feat: add comprehensive biometrics sync (Tier 1)"
 ### Task 5: Comprehensive Sync — Expanded Daily Wellness (Tier 2)
 
 **Files:**
-- Modify: `/Users/braydon/projects/experiments/garmin-connect-sync/sync.py`
-- Modify: `/Users/braydon/projects/experiments/garmin-connect-sync/schema.sql`
+- Modify: `/Users/<local-user>/projects/experiments/garmin-connect-sync/sync.py`
+- Modify: `/Users/<local-user>/projects/experiments/garmin-connect-sync/schema.sql`
 
 **Step 1: Add new columns to garmin_daily_summary**
 
@@ -663,7 +663,7 @@ python sync.py --daily-only --days-back 1
 
 Verify new columns populated:
 ```bash
-/opt/homebrew/Cellar/postgresql@17/17.7_1/bin/psql -U braydon -d assistant -c "SELECT calendar_date, steps, respiration_avg, spo2_avg, morning_readiness_score FROM garmin_daily_summary ORDER BY calendar_date DESC LIMIT 3"
+/opt/homebrew/Cellar/postgresql@17/17.7_1/bin/psql -U <db-user> -d assistant -c "SELECT calendar_date, steps, respiration_avg, spo2_avg, morning_readiness_score FROM garmin_daily_summary ORDER BY calendar_date DESC LIMIT 3"
 ```
 
 **Step 4: Commit**
@@ -677,8 +677,8 @@ git commit -am "feat: expand daily wellness sync with Tier 2 data"
 ### Task 6: Comprehensive Sync — Training Plans from Garmin (Tier 3)
 
 **Files:**
-- Modify: `/Users/braydon/projects/experiments/garmin-connect-sync/sync.py`
-- Modify: `/Users/braydon/projects/experiments/garmin-connect-sync/schema.sql`
+- Modify: `/Users/<local-user>/projects/experiments/garmin-connect-sync/sync.py`
+- Modify: `/Users/<local-user>/projects/experiments/garmin-connect-sync/schema.sql`
 
 **Step 1: Add tables to schema.sql**
 
@@ -775,8 +775,8 @@ git commit -am "feat: sync Garmin training plans and workouts (Tier 3)"
 ### Task 7: Comprehensive Sync — Activity Details (Tier 4)
 
 **Files:**
-- Modify: `/Users/braydon/projects/experiments/garmin-connect-sync/sync.py`
-- Modify: `/Users/braydon/projects/experiments/garmin-connect-sync/schema.sql`
+- Modify: `/Users/<local-user>/projects/experiments/garmin-connect-sync/sync.py`
+- Modify: `/Users/<local-user>/projects/experiments/garmin-connect-sync/schema.sql`
 
 **Step 1: Add `activity_details` table to schema.sql**
 
@@ -860,8 +860,8 @@ git commit -am "feat: activity detail enrichment with splits, HR zones, weather 
 ### Task 8: Comprehensive Sync — Gear Tracking (Tier 5)
 
 **Files:**
-- Modify: `/Users/braydon/projects/experiments/garmin-connect-sync/sync.py`
-- Modify: `/Users/braydon/projects/experiments/garmin-connect-sync/schema.sql`
+- Modify: `/Users/<local-user>/projects/experiments/garmin-connect-sync/sync.py`
+- Modify: `/Users/<local-user>/projects/experiments/garmin-connect-sync/schema.sql`
 
 **Step 1: Add `gear` table to schema.sql** (see design doc for schema)
 
@@ -1559,7 +1559,7 @@ git commit -m "feat: Coach Wilpers personality and system prompt builder"
 **Step 1: Add Agent SDK dependency**
 
 ```bash
-cd /Users/braydon/projects/experiments/training-assistant/api
+cd /Users/<local-user>/projects/experiments/training-assistant/api
 uv add anthropic
 ```
 
@@ -1730,7 +1730,7 @@ git commit -m "feat: Claude Agent SDK coach with SSE streaming chat"
 ### Task 17: Briefing Generator
 
 **Files:**
-- Create: `/Users/braydon/projects/experiments/garmin-connect-sync/briefing.py`
+- Create: `/Users/<local-user>/projects/experiments/garmin-connect-sync/briefing.py`
 
 **Step 1: Implement briefing script**
 
@@ -1810,7 +1810,7 @@ git commit -am "feat: proactive daily briefing generator"
 **Step 1: Create Vite + React + TypeScript project**
 
 ```bash
-cd /Users/braydon/projects/experiments/training-assistant
+cd /Users/<local-user>/projects/experiments/training-assistant
 npm create vite@latest web -- --template react-ts
 cd web
 npm install
@@ -2066,7 +2066,7 @@ git commit -am "feat: races and profile pages"
 **Files:**
 - Create: `deploy/com.training.api.plist`
 - Create: `deploy/com.training.web.plist`
-- Modify: `/Users/braydon/projects/experiments/garmin-connect-sync/run_sync.sh`
+- Modify: `/Users/<local-user>/projects/experiments/garmin-connect-sync/run_sync.sh`
 
 **Step 1: Create API launchd plist**
 
@@ -2079,7 +2079,7 @@ git commit -am "feat: races and profile pages"
     <string>com.training.api</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/Users/braydon/projects/experiments/training-assistant/api/.venv/bin/uvicorn</string>
+        <string>/Users/<local-user>/projects/experiments/training-assistant/api/.venv/bin/uvicorn</string>
         <string>src.main:app</string>
         <string>--host</string>
         <string>127.0.0.1</string>
@@ -2087,7 +2087,7 @@ git commit -am "feat: races and profile pages"
         <string>8000</string>
     </array>
     <key>WorkingDirectory</key>
-    <string>/Users/braydon/projects/experiments/training-assistant/api</string>
+    <string>/Users/<local-user>/projects/experiments/training-assistant/api</string>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>

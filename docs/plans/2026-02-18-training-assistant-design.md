@@ -433,7 +433,7 @@ Reuses existing PostgreSQL (same `assistant` database as garmin-connect-sync).
 ### Environment
 
 ```env
-DATABASE_URL=postgresql://braydon@localhost:5432/assistant
+DATABASE_URL=postgresql://<db-user>:5432/assistant
 ANTHROPIC_API_KEY=sk-ant-...
 COACH_MODEL=claude-sonnet-4-6
 SYNC_DAYS_BACK=3
