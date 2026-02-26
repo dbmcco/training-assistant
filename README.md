@@ -2,8 +2,11 @@
 
 ## Why I Built This
 
-I built Training Assistant because my real training data lived in multiple places,
-and the daily decision was still manual.
+I built Training Assistant while training for a Half Ironman in June.
+My schedule is unpredictable week to week, so static training plans kept breaking.
+
+My real training data lived in multiple places, and the daily decision was still manual.
+I needed an AI coach that could adapt guidance to real life, not an idealized plan.
 
 I wanted one place that answers:
 
@@ -20,6 +23,7 @@ This project turns raw metrics into daily coaching context I can act on quickly.
 - Shows plan calendar plus workout detail popovers on each day
 - Lets me compare planned vs completed work and spot drift early
 - Provides trend analysis and coaching interpretation of the data
+- Adapts day-by-day recommendations when my calendar or energy changes
 - Supports on-demand Garmin refresh when I open/refresh the app
 - Syncs completed Peloton workouts into Garmin so they appear in the same training history
 
@@ -29,6 +33,7 @@ This project turns raw metrics into daily coaching context I can act on quickly.
 - Better day-of decisions: readiness + plan + races shown together
 - Fewer sync surprises: refresh endpoint helps pull latest Garmin daily data
 - More consistency: plan adherence and trend views show what needs attention
+- Training guidance matches my actual life constraints, not generic one-size-fits-all plans
 
 ## The Coach (Personality + Behavior)
 
