@@ -21,6 +21,7 @@ This project turns raw metrics into daily coaching context I can act on quickly.
 - Lets me compare planned vs completed work and spot drift early
 - Provides trend analysis and coaching interpretation of the data
 - Supports on-demand Garmin refresh when I open/refresh the app
+- Syncs completed Peloton workouts into Garmin so they appear in the same training history
 
 ## Why It's Valuable
 
@@ -28,6 +29,41 @@ This project turns raw metrics into daily coaching context I can act on quickly.
 - Better day-of decisions: readiness + plan + races shown together
 - Fewer sync surprises: refresh endpoint helps pull latest Garmin daily data
 - More consistency: plan adherence and trend views show what needs attention
+
+## The Coach (Personality + Behavior)
+
+This app includes a streaming AI coach (`/api/v1/chat`) that is intentionally
+configured to act like a practical endurance coach, not a generic chatbot.
+
+Model/runtime:
+
+- Default model: `claude-sonnet-4-6` (`COACH_MODEL` in API config)
+- Tool-use loop with live token streaming (SSE)
+- Uses DB-backed tools for activities, readiness, load, races, plan adherence,
+  biometrics, and active alerts
+
+Coaching methodology:
+
+- Informed by Matt Wilpers-style principles: periodization, purpose-driven
+  sessions, recovery as real training data, and race-specific balance
+- Context checks include phase (`base/build/peak/taper/race_week`), A-race
+  countdown, acute:chronic load, discipline split, recovery signals, and
+  recent biometrics
+
+Personality/tone rules:
+
+- Direct, concise, conversational
+- Numbers over vague language
+- Short phone-friendly output (no markdown tables)
+- No guilt for missed sessions; restructure instead
+- No medical advice
+- Suggest changes first, then wait for athlete confirmation before applying
+
+Briefing behavior:
+
+- Daily briefing is short, structured, and A-race-focused
+- Separates headline, readiness summary, workout recommendation, and alerts
+- Produces structured recommendation-change payloads when workout edits are warranted
 
 ## Screenshots
 
@@ -65,6 +101,53 @@ in the same `experiments/` workspace.
 If Garmin sync is not configured yet, you can still run the app by disabling
 Garmin refresh/writeback in `api/.env` (see `api/.env.example`).
 
+### External Sync Pipeline (Garmin + Peloton)
+
+`training-assistant` depends on `garmin-connect-sync` for ingestion.
+
+- Garmin activity/recovery/calendar sync: `sync.py`
+- Peloton to Garmin bridge: `peloton_sync.py`
+- Scheduled combined sync runner: `run_sync.sh` (runs both)
+
+Expected workspace layout:
+
+- `/path/to/experiments/training-assistant`
+- `/path/to/experiments/garmin-connect-sync`
+
+First-time setup for ingestion:
+
+```bash
+cd ../garmin-connect-sync
+cp .env.example .env
+# Edit .env:
+#   DATABASE_URL=postgresql://<db-user>:<db-pass>@localhost:5432/assistant
+#   PELOTON_EMAIL=<your email>
+#   PELOTON_PASSWORD=<your password>
+
+# Authenticate Garmin and cache tokens
+python3 auth.py
+
+# Run combined Garmin + Peloton sync
+./run_sync.sh
+```
+
+Install scheduled sync jobs:
+
+```bash
+cd ../garmin-connect-sync
+./install.sh
+```
+
+Manual commands:
+
+```bash
+# Combined Garmin + Peloton sync
+cd ../garmin-connect-sync && ./run_sync.sh
+
+# Peloton-only sync window
+cd ../garmin-connect-sync && .venv/bin/python3 peloton_sync.py --days-back 7
+```
+
 ## Quick Start
 
 1. API setup:
@@ -94,6 +177,7 @@ The web app proxies `/api` requests to `http://127.0.0.1:8000`.
 - Dashboard refresh endpoint: `POST /api/v1/dashboard/refresh`
 - On-demand refresh pulls latest daily metrics via `garmin-connect-sync`
 - Refresh cadence is controlled by `GARMIN_REFRESH_MIN_INTERVAL_SECONDS`
+- This refresh endpoint is Garmin-focused; Peloton import runs via `garmin-connect-sync/run_sync.sh`
 
 ## Privacy and Secrets
 
