@@ -1,6 +1,7 @@
 """SSE chat endpoint and conversation CRUD routes."""
 
 import json
+import logging
 from datetime import datetime, timezone
 from uuid import UUID
 
@@ -15,6 +16,7 @@ from src.db.connection import get_db
 from src.db.models import Conversation, Message
 
 router = APIRouter(prefix="/api/v1", tags=["chat"])
+logger = logging.getLogger(__name__)
 
 
 class ChatRequest(BaseModel):
@@ -31,13 +33,20 @@ class ChatRequest(BaseModel):
 @router.post("/chat")
 async def chat(req: ChatRequest, db: AsyncSession = Depends(get_db)):
     async def event_generator():
-        async for event in run_coach(
-            user_message=req.message,
-            conversation_id=req.conversation_id,
-            view_context=req.view_context,
-            db=db,
-        ):
-            yield {"event": event["event"], "data": json.dumps(event["data"])}
+        try:
+            async for event in run_coach(
+                user_message=req.message,
+                conversation_id=req.conversation_id,
+                view_context=req.view_context,
+                db=db,
+            ):
+                yield {"event": event["event"], "data": json.dumps(event["data"])}
+        except Exception:
+            logger.exception("Unhandled error while streaming chat response")
+            yield {
+                "event": "done",
+                "data": json.dumps({"conversation_id": req.conversation_id, "error": True}),
+            }
 
     return EventSourceResponse(event_generator())
 

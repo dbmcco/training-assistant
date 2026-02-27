@@ -54,3 +54,4 @@ async def test_briefing_structure():
         assert "id" in briefing
         assert "date" in briefing
         assert "content" in briefing
+        assert "recommendation_change" in briefing

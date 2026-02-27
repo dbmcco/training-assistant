@@ -20,6 +20,13 @@ from src.db.models import (
     Race,
 )
 from src.services.readiness import compute_readiness
+from src.services.recovery_time import normalize_recovery_time_hours
+from src.services.recommendations import (
+    create_recommendation_from_briefing,
+    get_briefing_recommendation,
+    serialize_recommendation,
+)
+from src.services.units import format_distance_from_meters
 
 client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
 
@@ -47,13 +54,25 @@ RULES:
 - "readiness_summary" is recovery state only — score, key signal, one-word call (push/moderate/easy/rest).
 - "workout_recommendation" is about today's workout only — confirm it, adjust it, or swap it. One sentence.
 - "alerts" are only for genuine concerns. Not restatements of the briefing. Empty array if nothing is wrong.
+- "recommendation_change" is structured plan-edit data only when today's workout should change.
 - Reference numbers, not vibes. Keep it tight enough to scan on a phone.
+- Use imperial units only: miles for run/bike/other and yards for swim. Use /mi for pace references.
 
 {{
   "content": "1-2 sentences. The one thing to know today, framed by A-race goal.",
   "readiness_summary": "Score and call. e.g. Readiness 78 — HRV up, sleep weak. Moderate.",
   "workout_recommendation": "Confirm, adjust, or swap today's session. One sentence.",
-  "alerts": ["short, specific concern if any"]
+  "alerts": ["short, specific concern if any"],
+  "recommendation_change": {{
+    "needs_change": true,
+    "workout_id": "UUID if known, else null",
+    "workout_date": "YYYY-MM-DD",
+    "discipline": "run|bike|swim|strength|other",
+    "workout_type": "e.g. tempo, intervals, endurance",
+    "target_duration": 45,
+    "description": "Concrete replacement session details",
+    "reason": "Why this change improves training today"
+  }}
 }}
 """
 
@@ -72,12 +91,16 @@ async def gather_context(db: AsyncSession) -> dict:
 
     readiness_text = "No readiness data available."
     if summary:
+        recovery_time_hours = normalize_recovery_time_hours(
+            summary.recovery_time_hours,
+            summary.raw_data,
+        )
         r = compute_readiness(
             hrv_last_night=summary.hrv_last_night,
             hrv_7d_avg=summary.hrv_7d_avg,
             sleep_score=summary.sleep_score,
             body_battery_wake=summary.body_battery_at_wake,
-            recovery_time_hours=summary.recovery_time_hours,
+            recovery_time_hours=recovery_time_hours,
             training_load_7d=summary.training_load_7d,
             training_load_28d=summary.training_load_28d,
         )
@@ -201,7 +224,9 @@ async def gather_context(db: AsyncSession) -> dict:
             if a.duration_seconds:
                 line += f" ({a.duration_seconds / 60:.0f}min)"
             if a.distance_meters:
-                line += f" {a.distance_meters / 1000:.1f}km"
+                line += (
+                    f" {format_distance_from_meters(a.distance_meters, a.sport_type or a.activity_type)}"
+                )
             if a.average_hr:
                 line += f" HR {a.average_hr}"
             act_lines.append(line)
@@ -230,6 +255,18 @@ async def generate_briefing(db: AsyncSession) -> dict:
     )
     existing_row = existing.scalar_one_or_none()
     if existing_row:
+        recommendation_row = await get_briefing_recommendation(db, existing_row.id)
+        if recommendation_row is None:
+            recommendation_row = await create_recommendation_from_briefing(
+                db,
+                briefing=existing_row,
+                parsed_payload={
+                    "workout_recommendation": existing_row.workout_recommendation,
+                    "recommendation_change": {"needs_change": None},
+                },
+            )
+            if recommendation_row is not None:
+                await db.commit()
         return {
             "id": str(existing_row.id),
             "date": existing_row.date.isoformat(),
@@ -237,6 +274,7 @@ async def generate_briefing(db: AsyncSession) -> dict:
             "readiness_summary": existing_row.readiness_summary,
             "workout_recommendation": existing_row.workout_recommendation,
             "alerts": existing_row.alerts,
+            "recommendation_change": serialize_recommendation(recommendation_row) if recommendation_row else None,
             "created_at": existing_row.created_at.isoformat() if existing_row.created_at else None,
         }
 
@@ -266,6 +304,7 @@ async def generate_briefing(db: AsyncSession) -> dict:
                 "readiness_summary": None,
                 "workout_recommendation": None,
                 "alerts": [],
+                "recommendation_change": {"needs_change": False},
             }
 
     briefing = DailyBriefing(
@@ -278,6 +317,11 @@ async def generate_briefing(db: AsyncSession) -> dict:
         created_at=datetime.now(timezone.utc),
     )
     db.add(briefing)
+    recommendation_row = await create_recommendation_from_briefing(
+        db,
+        briefing=briefing,
+        parsed_payload=parsed,
+    )
     await db.commit()
     await db.refresh(briefing)
 
@@ -288,5 +332,6 @@ async def generate_briefing(db: AsyncSession) -> dict:
         "readiness_summary": briefing.readiness_summary,
         "workout_recommendation": briefing.workout_recommendation,
         "alerts": briefing.alerts,
+        "recommendation_change": serialize_recommendation(recommendation_row) if recommendation_row else None,
         "created_at": briefing.created_at.isoformat() if briefing.created_at else None,
     }

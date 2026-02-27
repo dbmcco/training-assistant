@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db.connection import get_db
 from src.db.models import GarminDailySummary
+from src.services.recovery_time import normalize_recovery_time_hours
 from src.services.readiness import compute_readiness
 
 router = APIRouter(prefix="/api/v1/readiness", tags=["readiness"])
@@ -25,12 +26,16 @@ async def readiness_today(db: AsyncSession = Depends(get_db)):
     if not summary:
         return {"score": 50, "label": "Moderate", "components": []}
 
+    recovery_time_hours = normalize_recovery_time_hours(
+        summary.recovery_time_hours,
+        summary.raw_data,
+    )
     readiness = compute_readiness(
         hrv_last_night=summary.hrv_last_night,
         hrv_7d_avg=summary.hrv_7d_avg,
         sleep_score=summary.sleep_score,
         body_battery_wake=summary.body_battery_at_wake,
-        recovery_time_hours=summary.recovery_time_hours,
+        recovery_time_hours=recovery_time_hours,
         training_load_7d=summary.training_load_7d,
         training_load_28d=summary.training_load_28d,
     )
@@ -67,12 +72,16 @@ async def readiness_history(
 
     history = []
     for s in summaries:
+        recovery_time_hours = normalize_recovery_time_hours(
+            s.recovery_time_hours,
+            s.raw_data,
+        )
         readiness = compute_readiness(
             hrv_last_night=s.hrv_last_night,
             hrv_7d_avg=s.hrv_7d_avg,
             sleep_score=s.sleep_score,
             body_battery_wake=s.body_battery_at_wake,
-            recovery_time_hours=s.recovery_time_hours,
+            recovery_time_hours=recovery_time_hours,
             training_load_7d=s.training_load_7d,
             training_load_28d=s.training_load_28d,
         )

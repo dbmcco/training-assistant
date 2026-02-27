@@ -4,6 +4,12 @@ interface TodayWorkoutProps {
   workout: TodayWorkoutType
 }
 
+function normalizePlannedDurationMinutes(rawDuration: number | null): number | null {
+  if (rawDuration == null || rawDuration <= 0) return null
+  // Garmin planned workouts arrive in seconds; user-entered edits may already be minutes.
+  return rawDuration >= 600 ? Math.round(rawDuration / 60) : rawDuration
+}
+
 const disciplineIcons: Record<string, string> = {
   run: '\u{1F3C3}',
   bike: '\u{1F6B4}',
@@ -21,6 +27,7 @@ const statusStyles: Record<string, string> = {
 export default function TodayWorkout({ workout }: TodayWorkoutProps) {
   const icon = disciplineIcons[workout.discipline] ?? '\u{1F3CB}'
   const statusClass = statusStyles[workout.status] ?? statusStyles.upcoming
+  const durationMinutes = normalizePlannedDurationMinutes(workout.target_duration)
 
   return (
     <div className="rounded-xl bg-gray-900 border border-gray-800 p-5">
@@ -38,9 +45,9 @@ export default function TodayWorkout({ workout }: TodayWorkoutProps) {
             <span className="text-sm font-semibold text-gray-100 capitalize">
               {workout.type} {workout.discipline}
             </span>
-            {workout.target_duration && (
+            {durationMinutes != null && (
               <span className="text-xs text-gray-500">
-                {workout.target_duration} min
+                {durationMinutes} min
               </span>
             )}
           </div>

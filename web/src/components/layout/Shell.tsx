@@ -8,7 +8,12 @@ interface ShellProps {
 }
 
 export default function Shell({ children }: ShellProps) {
-  const [chatOpen, setChatOpen] = useState(false)
+  const [chatOpen, setChatOpen] = useState(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+      return true
+    }
+    return window.matchMedia('(min-width: 768px)').matches
+  })
 
   return (
     <div className="flex h-[100dvh] bg-gray-950 text-gray-100 overflow-hidden">
@@ -17,7 +22,7 @@ export default function Shell({ children }: ShellProps) {
         <Sidebar />
       </div>
 
-      <main className="flex-1 overflow-y-auto pb-16 md:pb-0">{children}</main>
+      <main className="flex-1 min-w-0 overflow-y-auto pb-16 md:pb-0">{children}</main>
 
       <ChatPanel isOpen={chatOpen} onToggle={() => setChatOpen((v) => !v)} />
 

@@ -212,6 +212,30 @@ class DailyBriefing(Base):
     created_at = Column(TIMESTAMP(timezone=True))
 
 
+class RecommendationChange(Base):
+    __tablename__ = "recommendation_changes"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    source = Column(Text, nullable=False, default="briefing")
+    source_ref_id = Column(UUID(as_uuid=True), nullable=True)
+    planned_workout_id = Column(
+        UUID(as_uuid=True), ForeignKey("planned_workouts.id"), nullable=True
+    )
+    workout_date = Column(Date, nullable=True)
+    recommendation_text = Column(Text, nullable=True)
+    proposed_workout = Column(JSONB, nullable=True)
+    status = Column(Text, nullable=False, default="pending")
+    decision_notes = Column(Text, nullable=True)
+    requested_changes = Column(Text, nullable=True)
+    garmin_sync_status = Column(Text, nullable=True)
+    garmin_sync_payload = Column(JSONB, nullable=True)
+    garmin_sync_result = Column(JSONB, nullable=True)
+    training_impact_log = Column(JSONB, nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True))
+    decided_at = Column(TIMESTAMP(timezone=True))
+    applied_at = Column(TIMESTAMP(timezone=True))
+
+
 class Conversation(Base):
     __tablename__ = "conversations"
 

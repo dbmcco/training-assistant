@@ -1,3 +1,9 @@
+import MarkdownMessage from './MarkdownMessage'
+import type {
+  RecommendationChange,
+  RecommendationDecision,
+} from '../../api/types'
+
 interface ToolCallInfo {
   name: string
   status: 'calling' | 'done'
@@ -8,14 +14,26 @@ export interface Message {
   role: 'user' | 'assistant'
   content: string
   toolCalls?: ToolCallInfo[]
+  recommendationChange?: RecommendationChange | null
+}
+
+interface ChatMessageProps {
+  message: Message
+  decisionBusyId?: string | null
+  onRecommendationDecision?: (
+    recommendationId: string,
+    decision: RecommendationDecision,
+    note?: string,
+    requestedChanges?: string,
+  ) => void
 }
 
 function ToolCallIndicator({ tool }: { tool: ToolCallInfo }) {
   const labels: Record<string, string> = {
-    get_readiness: 'Checking your readiness...',
-    get_schedule: 'Looking at your schedule...',
-    get_metrics: 'Pulling your metrics...',
-    get_races: 'Checking your races...',
+    get_readiness_score: 'Checking your readiness...',
+    get_upcoming_workouts: 'Looking at your schedule...',
+    get_daily_metrics: 'Pulling your metrics...',
+    get_race_countdown: 'Checking your races...',
   }
 
   const label = labels[tool.name] ?? `Running ${tool.name}...`
@@ -38,7 +56,79 @@ function ToolCallIndicator({ tool }: { tool: ToolCallInfo }) {
   )
 }
 
-export default function ChatMessage({ message }: { message: Message }) {
+function RecommendationActions({
+  recommendation,
+  decisionBusyId,
+  onRecommendationDecision,
+}: {
+  recommendation: RecommendationChange
+  decisionBusyId?: string | null
+  onRecommendationDecision?: ChatMessageProps['onRecommendationDecision']
+}) {
+  if (!onRecommendationDecision) {
+    return null
+  }
+
+  const isBusy = decisionBusyId === recommendation.id
+  const isPending = recommendation.status === 'pending'
+
+  if (!isPending) {
+    const statusLabel = recommendation.status.replace('_', ' ')
+    return (
+      <div className="mt-3 rounded-lg border border-gray-700/80 bg-gray-900/60 px-3 py-2 text-xs text-gray-300">
+        Recommendation {statusLabel}. Garmin sync: {recommendation.garmin_sync_status ?? 'n/a'}.
+      </div>
+    )
+  }
+
+  return (
+    <div className="mt-3 rounded-lg border border-gray-700/80 bg-gray-900/60 px-3 py-3">
+      <div className="text-xs text-gray-300 mb-2">Recommendation change</div>
+      <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          disabled={isBusy}
+          onClick={() => onRecommendationDecision(recommendation.id, 'approved')}
+          className="px-2.5 py-1.5 rounded-md text-xs font-medium bg-green-500/15 text-green-300 border border-green-500/30 hover:bg-green-500/25 disabled:opacity-60"
+        >
+          Approve
+        </button>
+        <button
+          type="button"
+          disabled={isBusy}
+          onClick={() => onRecommendationDecision(recommendation.id, 'rejected')}
+          className="px-2.5 py-1.5 rounded-md text-xs font-medium bg-red-500/15 text-red-300 border border-red-500/30 hover:bg-red-500/25 disabled:opacity-60"
+        >
+          Reject
+        </button>
+        <button
+          type="button"
+          disabled={isBusy}
+          onClick={() => {
+            const requested = window.prompt('What should change in this recommendation?')
+            if (requested === null) return
+            const trimmed = requested.trim()
+            onRecommendationDecision(
+              recommendation.id,
+              'changes_requested',
+              trimmed || undefined,
+              trimmed || undefined,
+            )
+          }}
+          className="px-2.5 py-1.5 rounded-md text-xs font-medium bg-amber-500/15 text-amber-300 border border-amber-500/30 hover:bg-amber-500/25 disabled:opacity-60"
+        >
+          Ask for changes
+        </button>
+      </div>
+    </div>
+  )
+}
+
+export default function ChatMessage({
+  message,
+  decisionBusyId,
+  onRecommendationDecision,
+}: ChatMessageProps) {
   const isUser = message.role === 'user'
 
   return (
@@ -57,7 +147,20 @@ export default function ChatMessage({ message }: { message: Message }) {
             ))}
           </div>
         )}
-        <div className="whitespace-pre-wrap">{message.content}</div>
+        {isUser ? (
+          <div className="whitespace-pre-wrap">{message.content}</div>
+        ) : (
+          <>
+            <MarkdownMessage content={message.content} />
+            {message.recommendationChange && (
+              <RecommendationActions
+                recommendation={message.recommendationChange}
+                decisionBusyId={decisionBusyId}
+                onRecommendationDecision={onRecommendationDecision}
+              />
+            )}
+          </>
+        )}
       </div>
     </div>
   )

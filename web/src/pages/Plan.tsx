@@ -1,8 +1,9 @@
 import { useState, useCallback, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { fetchPlanWorkouts, fetchPlanAdherence } from '../api/client'
+import { fetchPlanActivities, fetchPlanWorkouts, fetchPlanAdherence } from '../api/client'
 import WeekCalendar from '../components/plan/WeekCalendar'
 import AdherenceBar from '../components/plan/AdherenceBar'
+import Races from './Races'
 
 function getMonday(d: Date): Date {
   const date = new Date(d)
@@ -36,6 +37,7 @@ export default function Plan() {
   const {
     data: workouts,
     isLoading: workoutsLoading,
+    isError: workoutsError,
   } = useQuery({
     queryKey: ['planWorkouts', startStr, endStr],
     queryFn: () => fetchPlanWorkouts(startStr, endStr),
@@ -44,10 +46,32 @@ export default function Plan() {
   const {
     data: adherence,
     isLoading: adherenceLoading,
+    isError: adherenceError,
   } = useQuery({
     queryKey: ['planAdherence', startStr, endStr],
     queryFn: () => fetchPlanAdherence(startStr, endStr),
   })
+
+  const {
+    data: activities,
+    isLoading: activitiesLoading,
+    isError: activitiesError,
+  } = useQuery({
+    queryKey: ['planActivities', startStr, endStr],
+    queryFn: () => fetchPlanActivities(startStr, endStr),
+  })
+
+  const atAGlance = useMemo(() => {
+    const planned = (workouts ?? []).length
+    const done = (activities ?? []).length
+    return {
+      planned,
+      done,
+      completionPct: planned > 0 ? Math.round((done / planned) * 100) : 0,
+    }
+  }, [workouts, activities])
+
+  const hasQueryError = workoutsError || adherenceError || activitiesError
 
   const onPrevWeek = useCallback(() => {
     setWeekStart((prev) => {
@@ -66,9 +90,9 @@ export default function Plan() {
   }, [])
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-6 space-y-8">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Training Plan</h1>
+        <h1 className="text-2xl font-bold">Plan & Races</h1>
         <button
           onClick={() => setWeekStart(getMonday(new Date()))}
           className="text-sm text-blue-400 hover:text-blue-300 transition-colors"
@@ -79,13 +103,39 @@ export default function Plan() {
 
       <AdherenceBar adherence={adherence} isLoading={adherenceLoading} />
 
+      {hasQueryError && (
+        <div className="rounded-xl bg-amber-500/10 border border-amber-500/30 px-4 py-3 text-xs text-amber-200">
+          Some plan data failed to load. Showing available data.
+        </div>
+      )}
+
+      <div className="grid grid-cols-3 gap-2">
+        <div className="rounded-lg bg-gray-900 border border-gray-800 px-3 py-2">
+          <div className="text-[11px] text-gray-500">Planned</div>
+          <div className="text-sm font-semibold text-gray-200">{atAGlance.planned}</div>
+        </div>
+        <div className="rounded-lg bg-gray-900 border border-gray-800 px-3 py-2">
+          <div className="text-[11px] text-gray-500">Done</div>
+          <div className="text-sm font-semibold text-emerald-300">{atAGlance.done}</div>
+        </div>
+        <div className="rounded-lg bg-gray-900 border border-gray-800 px-3 py-2">
+          <div className="text-[11px] text-gray-500">Done vs Plan</div>
+          <div className="text-sm font-semibold text-gray-200">{atAGlance.completionPct}%</div>
+        </div>
+      </div>
+
       <WeekCalendar
         weekStart={weekStart}
         workouts={workouts ?? []}
-        isLoading={workoutsLoading}
+        activities={activities ?? []}
+        isLoading={workoutsLoading || activitiesLoading}
         onPrevWeek={onPrevWeek}
         onNextWeek={onNextWeek}
       />
+
+      <div className="border-t border-gray-800 pt-6">
+        <Races embedded />
+      </div>
     </div>
   )
 }

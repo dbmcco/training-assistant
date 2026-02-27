@@ -10,6 +10,11 @@ from src.db.connection import get_db
 from src.db.models import DailyBriefing, GarminDailySummary, Race
 from src.services.analytics import (
     activity_stats,
+    activity_type_breakdown,
+    coaching_analysis,
+    daily_metric_trend,
+    trend_data_window,
+    trend_metric_options,
     training_load_trend,
     weekly_volume_by_discipline,
 )
@@ -17,9 +22,33 @@ from src.services.plan_engine import (
     get_plan_adherence,
     get_today_workout,
 )
+from src.services.garmin_refresh import refresh_garmin_daily_data_on_demand
+from src.services.recovery_time import normalize_recovery_time_hours
 from src.services.readiness import compute_readiness
+from src.services.recommendations import (
+    get_briefing_recommendation,
+    serialize_recommendation,
+)
 
 router = APIRouter(prefix="/api/v1/dashboard", tags=["dashboard"])
+
+
+@router.post("/refresh")
+async def dashboard_refresh(
+    include_calendar: bool = Query(
+        default=False,
+        description="Also refresh planned workouts/calendar in addition to today's summary.",
+    ),
+    force: bool = Query(
+        default=False,
+        description="Bypass short refresh cooldown and run immediately.",
+    ),
+):
+    """Refresh Garmin data on demand (typically called on app refresh)."""
+    return await refresh_garmin_daily_data_on_demand(
+        include_calendar=include_calendar,
+        force=force,
+    )
 
 
 @router.get("/today")
@@ -37,12 +66,16 @@ async def dashboard_today(db: AsyncSession = Depends(get_db)):
 
     # Compute readiness from the latest summary
     if summary:
+        recovery_time_hours = normalize_recovery_time_hours(
+            summary.recovery_time_hours,
+            summary.raw_data,
+        )
         readiness = compute_readiness(
             hrv_last_night=summary.hrv_last_night,
             hrv_7d_avg=summary.hrv_7d_avg,
             sleep_score=summary.sleep_score,
             body_battery_wake=summary.body_battery_at_wake,
-            recovery_time_hours=summary.recovery_time_hours,
+            recovery_time_hours=recovery_time_hours,
             training_load_7d=summary.training_load_7d,
             training_load_28d=summary.training_load_28d,
         )
@@ -105,11 +138,13 @@ async def dashboard_today(db: AsyncSession = Depends(get_db)):
     briefing_row = briefing_result.scalar_one_or_none()
     briefing = None
     if briefing_row:
+        recommendation_row = await get_briefing_recommendation(db, briefing_row.id)
         briefing = {
             "content": briefing_row.content,
             "readiness_summary": briefing_row.readiness_summary,
             "workout_recommendation": briefing_row.workout_recommendation,
             "alerts": briefing_row.alerts,
+            "recommendation_change": serialize_recommendation(recommendation_row) if recommendation_row else None,
         }
 
     return {
@@ -144,22 +179,66 @@ async def dashboard_weekly(db: AsyncSession = Depends(get_db)):
 async def dashboard_trends(
     start: date | None = Query(default=None, description="Start date (ISO format)"),
     end: date | None = Query(default=None, description="End date (ISO format)"),
-    metric: str | None = Query(default=None, description="Optional metric filter"),
+    metric: str = Query(default="readiness", description="Metric key for timeseries"),
     db: AsyncSession = Depends(get_db),
 ):
-    """Return configurable date range trends with volume and activity stats."""
+    """Return configurable trends and summary stats across multiple data types."""
+    requested_start = start
+    requested_end = end
+    window = await trend_data_window(db)
+    earliest_data_date = window["earliest_date"]
+    latest_data_date = window["latest_date"]
+
     if end is None:
-        end = date.today()
+        end = latest_data_date or date.today()
     if start is None:
         start = end - timedelta(days=30)
 
+    range_adjusted = False
+    if earliest_data_date and latest_data_date:
+        span_days = max((end - start).days, 1)
+        if start > latest_data_date:
+            end = latest_data_date
+            start = max(earliest_data_date, latest_data_date - timedelta(days=span_days))
+            range_adjusted = True
+        elif end < earliest_data_date:
+            start = earliest_data_date
+            end = min(latest_data_date, earliest_data_date + timedelta(days=span_days))
+            range_adjusted = True
+        else:
+            if start < earliest_data_date:
+                start = earliest_data_date
+                range_adjusted = True
+            if end > latest_data_date:
+                end = latest_data_date
+                range_adjusted = True
+
+    if start > end:
+        start = end
+        range_adjusted = True
+
     volume = await weekly_volume_by_discipline(db, start, end)
     stats = await activity_stats(db, start, end)
+    activity_types = await activity_type_breakdown(db, start, end)
+    metric_data = await daily_metric_trend(db, start, end, metric)
+    analysis = await coaching_analysis(db, start, end, volume, stats)
 
     return {
         "start": start.isoformat(),
         "end": end.isoformat(),
-        "metric": metric,
+        "requested_start": requested_start.isoformat() if requested_start else None,
+        "requested_end": requested_end.isoformat() if requested_end else None,
+        "range_adjusted": range_adjusted,
+        "earliest_data_date": earliest_data_date.isoformat() if earliest_data_date else None,
+        "latest_data_date": latest_data_date.isoformat() if latest_data_date else None,
+        "metric": metric_data["metric"],
+        "metric_label": metric_data["label"],
+        "metric_unit": metric_data["unit"],
+        "metric_options": trend_metric_options(),
+        "series": metric_data["series"],
+        "series_summary": metric_data["summary"],
         "volume": volume,
+        "activity_types": activity_types,
         "stats": stats,
+        "analysis": analysis,
     }

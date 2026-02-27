@@ -13,6 +13,11 @@ class Settings(BaseSettings):
     db_pool_recycle_seconds: int = 1800
     anthropic_api_key: str = ""
     coach_model: str = "claude-sonnet-4-6"
+    coach_prompt_history_messages: int = 12
+    coach_memory_enabled: bool = True
+    coach_memory_retrieval_limit: int = 6
+    coach_memory_backfill_limit_messages: int = 2000
+    coach_memory_embedding_dim: int = 256
     cors_origins: list[str] = ["http://localhost:5173"]
     garmin_writeback_enabled: bool = True
     garmin_writeback_repo: str = ""

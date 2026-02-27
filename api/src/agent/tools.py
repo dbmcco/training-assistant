@@ -18,6 +18,12 @@ from src.db.models import (
     PlannedWorkout,
     Race,
 )
+from src.services.units import (
+    format_distance_from_kilometers,
+    format_distance_from_meters,
+    format_pace_per_mile,
+)
+from src.services.recovery_time import normalize_recovery_time_hours
 
 TOOL_DEFINITIONS: list[dict] = [
     {
@@ -335,8 +341,9 @@ async def _query_activities(
             mins = a.duration_seconds / 60
             line += f" ({mins:.0f}min)"
         if a.distance_meters:
-            km = a.distance_meters / 1000
-            line += f" {km:.1f}km"
+            line += (
+                f" {format_distance_from_meters(a.distance_meters, a.sport_type or a.activity_type)}"
+            )
         if a.average_hr:
             line += f" avg HR {a.average_hr}"
         lines.append(line)
@@ -389,12 +396,16 @@ async def _get_readiness_score(db: AsyncSession) -> str:
     if not summary:
         return "No daily summary data available to compute readiness score."
 
+    recovery_time_hours = normalize_recovery_time_hours(
+        summary.recovery_time_hours,
+        summary.raw_data,
+    )
     score = compute_readiness(
         hrv_last_night=summary.hrv_last_night,
         hrv_7d_avg=summary.hrv_7d_avg,
         sleep_score=summary.sleep_score,
         body_battery_wake=summary.body_battery_at_wake,
-        recovery_time_hours=summary.recovery_time_hours,
+        recovery_time_hours=recovery_time_hours,
         training_load_7d=summary.training_load_7d,
         training_load_28d=summary.training_load_28d,
     )
@@ -582,7 +593,7 @@ async def _get_discipline_distribution(
             pct = round(v["hours"] / total_hours * 100, 1)
             lines.append(
                 f"  - {disc}: {v['hours']:.1f}h ({pct}%) — "
-                f"{v['distance_km']:.1f}km, {v['count']} sessions"
+                f"{format_distance_from_kilometers(v['distance_km'], disc)}, {v['count']} sessions"
             )
 
     lines.append(f"  Total: {total_hours:.1f} hours")
@@ -715,9 +726,9 @@ async def _get_biometrics(db: AsyncSession) -> str:
     if bio.lactate_threshold_hr is not None:
         lines.append(f"  Lactate threshold HR: {bio.lactate_threshold_hr} bpm")
     if bio.lactate_threshold_pace is not None:
-        # pace is stored as seconds per km
-        m, s = divmod(int(bio.lactate_threshold_pace), 60)
-        lines.append(f"  Lactate threshold pace: {m}:{s:02d}/km")
+        lines.append(
+            f"  Lactate threshold pace: {format_pace_per_mile(bio.lactate_threshold_pace)}"
+        )
 
     return "\n".join(lines)
 

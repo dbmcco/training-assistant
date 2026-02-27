@@ -1,7 +1,10 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { fetchDashboardToday, fetchDashboardWeekly, generateBriefing } from '../api/client'
-import type { Briefing } from '../api/types'
-import BriefingBanner from '../components/dashboard/BriefingBanner'
+import { useEffect, useRef } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import {
+  fetchDashboardToday,
+  fetchDashboardWeekly,
+  refreshDashboardData,
+} from '../api/client'
 import ReadinessCard from '../components/dashboard/ReadinessCard'
 import MetricsRow from '../components/dashboard/MetricsRow'
 import TodayWorkout from '../components/dashboard/TodayWorkout'
@@ -24,6 +27,21 @@ function SkeletonCard({ className = '' }: { className?: string }) {
 
 export default function Dashboard() {
   const queryClient = useQueryClient()
+  const hasTriggeredRefreshRef = useRef(false)
+
+  const refreshMutation = useMutation({
+    mutationFn: () => refreshDashboardData(),
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['dashboard', 'today'] })
+      queryClient.invalidateQueries({ queryKey: ['dashboard', 'weekly'] })
+    },
+  })
+
+  useEffect(() => {
+    if (hasTriggeredRefreshRef.current) return
+    hasTriggeredRefreshRef.current = true
+    refreshMutation.mutate()
+  }, [refreshMutation.mutate])
 
   const today = useQuery({
     queryKey: ['dashboard', 'today'],
@@ -33,15 +51,6 @@ export default function Dashboard() {
   const weekly = useQuery({
     queryKey: ['dashboard', 'weekly'],
     queryFn: fetchDashboardWeekly,
-  })
-
-  const briefingMutation = useMutation({
-    mutationFn: generateBriefing,
-    onSuccess: (briefing: Briefing) => {
-      queryClient.setQueryData(['dashboard', 'today'], (old: typeof today.data) =>
-        old ? { ...old, briefing } : old,
-      )
-    },
   })
 
   if (today.isLoading) {
@@ -76,23 +85,9 @@ export default function Dashboard() {
 
   return (
     <div className="p-6 space-y-6 max-w-6xl mx-auto">
-      {/* Briefing Banner */}
-      {data.briefing ? (
-        <BriefingBanner briefing={data.briefing} />
-      ) : (
-        <button
-          onClick={() => briefingMutation.mutate()}
-          disabled={briefingMutation.isPending}
-          className="w-full rounded-xl bg-gray-900 border border-gray-800 px-5 py-3 text-left hover:bg-gray-800/40 transition-colors flex items-center gap-2 disabled:opacity-50"
-        >
-          <svg className="w-5 h-5 text-blue-400 shrink-0" viewBox="0 0 20 20" fill="currentColor">
-            <path d="M11 3a1 1 0 10-2 0v1a1 1 0 102 0V3zM15.657 5.757a1 1 0 00-1.414-1.414l-.707.707a1 1 0 001.414 1.414l.707-.707zM18 10a1 1 0 01-1 1h-1a1 1 0 110-2h1a1 1 0 011 1zM5.05 6.464A1 1 0 106.464 5.05l-.707-.707a1 1 0 00-1.414 1.414l.707.707zM5 10a1 1 0 01-1 1H3a1 1 0 110-2h1a1 1 0 011 1zM8 16v-1h4v1a2 2 0 11-4 0zM12 14c.015-.34.208-.646.477-.859a4 4 0 10-4.954 0c.27.213.462.519.476.859h4.002z" />
-          </svg>
-          <span className="text-sm font-semibold text-gray-100">
-            {briefingMutation.isPending ? 'Generating briefing...' : 'Generate Morning Briefing'}
-          </span>
-        </button>
-      )}
+      <div className="rounded-xl bg-gray-900 border border-gray-800 px-5 py-4 text-sm text-gray-300">
+        Daily briefing and recommendation approvals now live in the <span className="text-blue-300 font-medium">Coach chat</span>.
+      </div>
 
       {/* Metrics Row */}
       <MetricsRow metrics={data.metrics} trainingStatus={data.training_status} />
@@ -108,7 +103,11 @@ export default function Dashboard() {
 
         {/* Right column */}
         <div className="space-y-6">
-          {weekly.data ? (
+          {weekly.isError ? (
+            <div className="rounded-xl bg-red-500/10 border border-red-500/20 p-5 text-sm text-red-300">
+              Could not load weekly volume and load trend.
+            </div>
+          ) : weekly.data ? (
             <>
               <WeeklyVolume volume={weekly.data.volume} />
               <LoadTrend loadTrend={weekly.data.load_trend} />

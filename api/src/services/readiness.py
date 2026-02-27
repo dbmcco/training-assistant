@@ -28,7 +28,7 @@ def compute_readiness(
     hrv_7d_avg: int | None,
     sleep_score: int | None,
     body_battery_wake: int | None,
-    recovery_time_hours: int | None,
+    recovery_time_hours: float | None,
     training_load_7d: float | None,
     training_load_28d: float | None,
 ) -> ReadinessScore:
@@ -88,13 +88,18 @@ def compute_readiness(
     # Recovery time component (15%) — 0 hours = 100, 48+ hours = 0
     if recovery_time_hours is not None:
         rec_norm = max(0.0, 100.0 - (recovery_time_hours / 48.0 * 100.0))
+        rec_hours_text = (
+            f"{int(recovery_time_hours)}"
+            if float(recovery_time_hours).is_integer()
+            else f"{recovery_time_hours:.1f}"
+        )
         components.append(
             ReadinessComponent(
                 "recovery",
                 recovery_time_hours,
                 rec_norm,
                 0.15,
-                f"{recovery_time_hours}h recovery needed",
+                f"{rec_hours_text}h recovery needed",
             )
         )
         total_weight += 0.15

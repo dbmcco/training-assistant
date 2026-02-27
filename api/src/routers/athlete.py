@@ -1,13 +1,66 @@
 """Athlete profile, biometrics, records, and gear routes."""
 
+from math import isfinite
+
 from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db.connection import get_db
 from src.db.models import AthleteProfile, AthleteBiometrics, Gear, PersonalRecord
+from src.services.units import format_distance_from_meters
 
 router = APIRouter(prefix="/api/v1/athlete", tags=["athlete"])
+
+
+def _looks_like_time_record(record_type: str) -> bool:
+    normalized = record_type.strip().lower()
+    time_tokens = (
+        "fastest",
+        "best",
+        "1k",
+        "5k",
+        "10k",
+        "half marathon",
+        "marathon",
+        "1 mile",
+        "mile",
+    )
+    return any(token in normalized for token in time_tokens)
+
+
+def _looks_like_distance_record(record_type: str) -> bool:
+    normalized = record_type.strip().lower()
+    distance_tokens = ("distance", "longest")
+    return any(token in normalized for token in distance_tokens)
+
+
+def _format_duration(seconds: float | None) -> str:
+    if seconds is None or not isfinite(seconds) or seconds <= 0:
+        return "--"
+
+    total = int(round(seconds))
+    hours, remainder = divmod(total, 3600)
+    minutes, secs = divmod(remainder, 60)
+    if hours > 0:
+        return f"{hours}:{minutes:02d}:{secs:02d}"
+    return f"{minutes}:{secs:02d}"
+
+
+def _record_display_value(record: PersonalRecord) -> tuple[str, str, str]:
+    raw_value = record.value
+    if raw_value is None:
+        return "--", "", "unknown"
+
+    record_type = record.record_type or ""
+    activity = record.activity_type or ""
+
+    if _looks_like_time_record(record_type):
+        return _format_duration(raw_value), "time", "duration"
+    if _looks_like_distance_record(record_type):
+        return format_distance_from_meters(raw_value, activity), "distance", "distance"
+
+    return f"{raw_value:.2f}".rstrip("0").rstrip("."), "value", "numeric"
 
 
 @router.get("/profile")
@@ -55,17 +108,25 @@ async def athlete_records(db: AsyncSession = Depends(get_db)):
         select(PersonalRecord).order_by(PersonalRecord.recorded_at.desc())
     )
     records = result.scalars().all()
-    return [
-        {
-            "id": str(r.id),
-            "record_type": r.record_type,
-            "activity_type": r.activity_type,
-            "value": r.value,
-            "activity_id": r.activity_id,
-            "recorded_at": r.recorded_at.isoformat() if r.recorded_at else None,
-        }
-        for r in records
-    ]
+    payload = []
+    for record in records:
+        display_value, value_unit, value_kind = _record_display_value(record)
+        payload.append(
+            {
+                "id": str(record.id),
+                "record_type": record.record_type,
+                "activity_type": record.activity_type,
+                "value": record.value,
+                "display_value": display_value,
+                "value_unit": value_unit,
+                "value_kind": value_kind,
+                "activity_id": record.activity_id,
+                "recorded_at": (
+                    record.recorded_at.isoformat() if record.recorded_at else None
+                ),
+            }
+        )
+    return payload
 
 
 @router.get("/gear")

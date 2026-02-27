@@ -206,14 +206,14 @@ function RaceRow({
       <div className="flex items-start justify-between">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-3 mb-1">
-            <h3 className="text-base font-semibold text-gray-100 truncate">
+            <h3 className="text-base font-semibold text-gray-100 break-words min-w-0">
               {race.name}
             </h3>
             <span className="shrink-0 text-xs font-medium px-2 py-0.5 rounded-full bg-gray-800 text-gray-400">
               {formatDistanceType(race.distance_type)}
             </span>
           </div>
-          <div className="flex items-center gap-4 text-sm text-gray-500">
+          <div className="flex flex-wrap items-center gap-3 text-sm text-gray-500">
             <span>
               {new Date(race.date + 'T00:00:00').toLocaleDateString('en-US', {
                 weekday: 'short',
@@ -234,7 +234,7 @@ function RaceRow({
             )}
           </div>
           {race.notes && (
-            <p className="text-xs text-gray-600 mt-2">{race.notes}</p>
+            <p className="text-xs text-gray-600 mt-2 break-words">{race.notes}</p>
           )}
         </div>
         <div className="flex items-center gap-1 ml-4 shrink-0">
@@ -266,7 +266,11 @@ function RaceRow({
   )
 }
 
-export default function Races() {
+interface RacesProps {
+  embedded?: boolean
+}
+
+export default function Races({ embedded = false }: RacesProps) {
   const queryClient = useQueryClient()
   const [showAddForm, setShowAddForm] = useState(false)
   const [editingRace, setEditingRace] = useState<Race | null>(null)
@@ -346,9 +350,9 @@ export default function Races() {
   })
 
   return (
-    <div className="p-6 space-y-6">
+    <div className={embedded ? 'space-y-6' : 'p-6 space-y-6'}>
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Races</h1>
+        <h2 className={embedded ? 'text-xl font-semibold' : 'text-2xl font-bold'}>Races</h2>
         {!showAddForm && !editingRace && (
           <button
             onClick={() => setShowAddForm(true)}

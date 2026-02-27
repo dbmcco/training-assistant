@@ -36,7 +36,13 @@ async def test_athlete_records():
     ) as client:
         resp = await client.get("/api/v1/athlete/records")
     assert resp.status_code == 200
-    assert isinstance(resp.json(), list)
+    data = resp.json()
+    assert isinstance(data, list)
+    if data:
+        first = data[0]
+        assert "display_value" in first
+        assert "value_unit" in first
+        assert "value_kind" in first
 
 
 @pytest.mark.asyncio

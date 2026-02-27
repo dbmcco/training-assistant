@@ -2,36 +2,87 @@ import type {
   Briefing,
   DashboardToday,
   DashboardWeekly,
+  DashboardTrends,
   Race,
   Conversation,
   PlannedWorkout,
+  PlanActivity,
   Adherence,
   AthleteProfile,
   AthleteBiometrics,
   PersonalRecord,
   GearItem,
+  RecommendationChange,
+  RecommendationDecision,
+  ConversationDetail,
 } from './types'
 
 const BASE = '/api/v1'
+const REQUEST_TIMEOUT_MS = 12_000
+const CHAT_STREAM_IDLE_TIMEOUT_MS = 45_000
+
+async function fetchWithTimeout(
+  input: RequestInfo | URL,
+  init?: RequestInit,
+  timeoutMs = REQUEST_TIMEOUT_MS,
+): Promise<Response> {
+  const controller = new AbortController()
+  const timeoutId = globalThis.setTimeout(() => controller.abort(), timeoutMs)
+
+  try {
+    return await fetch(input, {
+      ...init,
+      signal: controller.signal,
+    })
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      throw new Error(`Request timed out after ${Math.round(timeoutMs / 1000)}s`)
+    }
+    throw error
+  } finally {
+    globalThis.clearTimeout(timeoutId)
+  }
+}
 
 export async function fetchDashboardToday(): Promise<DashboardToday> {
-  const res = await fetch(`${BASE}/dashboard/today`)
+  const res = await fetchWithTimeout(`${BASE}/dashboard/today`)
   if (!res.ok) throw new Error(`Dashboard fetch failed: ${res.status}`)
   return res.json()
 }
 
+export async function refreshDashboardData(options?: {
+  includeCalendar?: boolean
+  force?: boolean
+}): Promise<{
+  status: string
+  reason?: string
+}> {
+  const params = new URLSearchParams()
+  if (options?.includeCalendar) params.set('include_calendar', 'true')
+  if (options?.force) params.set('force', 'true')
+  const suffix = params.toString() ? `?${params.toString()}` : ''
+  const res = await fetchWithTimeout(
+    `${BASE}/dashboard/refresh${suffix}`,
+    { method: 'POST' },
+    45_000,
+  )
+  if (!res.ok) throw new Error(`Dashboard refresh failed: ${res.status}`)
+  return res.json()
+}
+
 export async function fetchDashboardWeekly(): Promise<DashboardWeekly> {
-  const res = await fetch(`${BASE}/dashboard/weekly`)
+  const res = await fetchWithTimeout(`${BASE}/dashboard/weekly`)
   if (!res.ok) throw new Error(`Weekly dashboard fetch failed: ${res.status}`)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const raw: any = await res.json()
 
   const volume = Object.entries(raw.volume ?? {}).map(([discipline, val]) => {
-    const v = val as { hours?: number; distance_km?: number }
+    const v = val as { hours?: number; distance_km?: number; count?: number }
     return {
       discipline,
       duration_minutes: Math.round((v.hours ?? 0) * 60),
       distance_km: v.distance_km ?? 0,
+      count: v.count ?? 0,
     }
   })
 
@@ -54,8 +105,23 @@ export async function fetchDashboardWeekly(): Promise<DashboardWeekly> {
   return { volume, adherence, load_trend }
 }
 
+export async function fetchDashboardTrends(
+  startDate: string,
+  endDate: string,
+  metric: string,
+): Promise<DashboardTrends> {
+  const params = new URLSearchParams({
+    start: startDate,
+    end: endDate,
+    metric,
+  })
+  const res = await fetchWithTimeout(`${BASE}/dashboard/trends?${params.toString()}`)
+  if (!res.ok) throw new Error(`Trends dashboard fetch failed: ${res.status}`)
+  return res.json()
+}
+
 export async function fetchRaces(): Promise<Race[]> {
-  const res = await fetch(`${BASE}/races`)
+  const res = await fetchWithTimeout(`${BASE}/races`)
   if (!res.ok) throw new Error(`Races fetch failed: ${res.status}`)
   return res.json()
 }
@@ -64,7 +130,7 @@ export async function fetchPlanWorkouts(
   startDate: string,
   endDate: string,
 ): Promise<PlannedWorkout[]> {
-  const res = await fetch(
+  const res = await fetchWithTimeout(
     `${BASE}/plan/workouts?start_date=${startDate}&end_date=${endDate}`,
   )
   if (!res.ok) throw new Error(`Plan workouts fetch failed: ${res.status}`)
@@ -75,7 +141,7 @@ export async function fetchPlanAdherence(
   startDate: string,
   endDate: string,
 ): Promise<Adherence> {
-  const res = await fetch(
+  const res = await fetchWithTimeout(
     `${BASE}/plan/adherence?start=${startDate}&end=${endDate}`,
   )
   if (!res.ok) throw new Error(`Plan adherence fetch failed: ${res.status}`)
@@ -89,6 +155,17 @@ export async function fetchPlanAdherence(
   }
 }
 
+export async function fetchPlanActivities(
+  startDate: string,
+  endDate: string,
+): Promise<PlanActivity[]> {
+  const res = await fetchWithTimeout(
+    `${BASE}/plan/activities?start_date=${startDate}&end_date=${endDate}`,
+  )
+  if (!res.ok) throw new Error(`Plan activities fetch failed: ${res.status}`)
+  return res.json()
+}
+
 export async function createRace(data: {
   name: string
   date: string
@@ -96,7 +173,7 @@ export async function createRace(data: {
   goal_time?: number | null
   notes?: string | null
 }): Promise<Race> {
-  const res = await fetch(`${BASE}/races`, {
+  const res = await fetchWithTimeout(`${BASE}/races`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
@@ -115,7 +192,7 @@ export async function updateRace(
     notes?: string | null
   },
 ): Promise<Race> {
-  const res = await fetch(`${BASE}/races/${id}`, {
+  const res = await fetchWithTimeout(`${BASE}/races/${id}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
@@ -125,43 +202,81 @@ export async function updateRace(
 }
 
 export async function deleteRace(id: string): Promise<void> {
-  const res = await fetch(`${BASE}/races/${id}`, { method: 'DELETE' })
+  const res = await fetchWithTimeout(`${BASE}/races/${id}`, { method: 'DELETE' })
   if (!res.ok) throw new Error(`Delete race failed: ${res.status}`)
 }
 
 export async function fetchAthleteProfile(): Promise<AthleteProfile> {
-  const res = await fetch(`${BASE}/athlete/profile`)
+  const res = await fetchWithTimeout(`${BASE}/athlete/profile`)
   if (!res.ok) throw new Error(`Profile fetch failed: ${res.status}`)
   return res.json()
 }
 
 export async function fetchAthleteBiometrics(): Promise<AthleteBiometrics> {
-  const res = await fetch(`${BASE}/athlete/biometrics`)
+  const res = await fetchWithTimeout(`${BASE}/athlete/biometrics`)
   if (!res.ok) throw new Error(`Biometrics fetch failed: ${res.status}`)
   return res.json()
 }
 
 export async function fetchAthleteRecords(): Promise<PersonalRecord[]> {
-  const res = await fetch(`${BASE}/athlete/records`)
+  const res = await fetchWithTimeout(`${BASE}/athlete/records`)
   if (!res.ok) throw new Error(`Records fetch failed: ${res.status}`)
   return res.json()
 }
 
 export async function fetchAthleteGear(): Promise<GearItem[]> {
-  const res = await fetch(`${BASE}/athlete/gear`)
+  const res = await fetchWithTimeout(`${BASE}/athlete/gear`)
   if (!res.ok) throw new Error(`Gear fetch failed: ${res.status}`)
   return res.json()
 }
 
 export async function generateBriefing(): Promise<Briefing> {
-  const res = await fetch(`${BASE}/briefings/generate`, { method: 'POST' })
+  const res = await fetchWithTimeout(`${BASE}/briefings/generate`, { method: 'POST' })
   if (!res.ok) throw new Error(`Briefing generation failed: ${res.status}`)
   return res.json()
 }
 
+export async function submitRecommendationDecision(
+  recommendationId: string,
+  payload: {
+    decision: RecommendationDecision
+    note?: string
+    requested_changes?: string
+  },
+): Promise<RecommendationChange> {
+  const res = await fetchWithTimeout(`${BASE}/recommendations/${recommendationId}/decision`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) throw new Error(`Recommendation decision failed: ${res.status}`)
+  return res.json()
+}
+
+export async function fetchRecommendations(options?: {
+  status?: string
+  limit?: number
+}): Promise<RecommendationChange[]> {
+  const params = new URLSearchParams()
+  if (options?.status) params.set('status', options.status)
+  if (options?.limit) params.set('limit', String(options.limit))
+  const suffix = params.toString() ? `?${params.toString()}` : ''
+  const res = await fetchWithTimeout(`${BASE}/recommendations${suffix}`)
+  if (!res.ok) throw new Error(`Recommendations fetch failed: ${res.status}`)
+  return res.json()
+}
+
 export async function fetchConversations(): Promise<Conversation[]> {
-  const res = await fetch(`${BASE}/conversations`)
+  const res = await fetchWithTimeout(`${BASE}/conversations`)
   if (!res.ok) throw new Error(`Conversations fetch failed: ${res.status}`)
+  return res.json()
+}
+
+export async function fetchConversation(
+  conversationId: string,
+): Promise<ConversationDetail> {
+  const res = await fetchWithTimeout(`${BASE}/conversations/${conversationId}`)
+  if (!res.ok) throw new Error(`Conversation fetch failed: ${res.status}`)
   return res.json()
 }
 
@@ -186,25 +301,75 @@ export async function* streamChat(
   const reader = res.body.getReader()
   const decoder = new TextDecoder()
   let buffer = ''
+  let currentEvent = 'message'
+
+  const parseData = (
+    payload: string,
+  ): { event: string; data: Record<string, unknown> } | null => {
+    try {
+      let parsed: unknown = JSON.parse(payload)
+      if (typeof parsed === 'string') {
+        try {
+          parsed = JSON.parse(parsed)
+        } catch {
+          parsed = { raw: parsed }
+        }
+      }
+      return {
+        event: currentEvent,
+        data: (parsed as Record<string, unknown>) ?? {},
+      }
+    } catch {
+      return null
+    } finally {
+      currentEvent = 'message'
+    }
+  }
+
+  const readWithIdleTimeout = async () => {
+    return new Promise<ReadableStreamReadResult<Uint8Array>>((resolve, reject) => {
+      const timeoutId = globalThis.setTimeout(() => {
+        reject(new Error('Chat stream timed out waiting for data'))
+      }, CHAT_STREAM_IDLE_TIMEOUT_MS)
+      reader
+        .read()
+        .then((result) => {
+          globalThis.clearTimeout(timeoutId)
+          resolve(result)
+        })
+        .catch((error) => {
+          globalThis.clearTimeout(timeoutId)
+          reject(error)
+        })
+    })
+  }
 
   while (true) {
-    const { done, value } = await reader.read()
+    const { done, value } = await readWithIdleTimeout()
     if (done) break
     buffer += decoder.decode(value, { stream: true })
     const lines = buffer.split('\n')
     buffer = lines.pop() || ''
     for (const line of lines) {
       if (line.startsWith('event: ')) {
-        // SSE event type line — next data line has the payload
+        currentEvent = line.slice(7).trim() || 'message'
         continue
       }
       if (line.startsWith('data: ')) {
-        try {
-          yield JSON.parse(line.slice(6))
-        } catch {
-          // skip malformed JSON
+        const evt = parseData(line.slice(6))
+        if (evt) {
+          yield evt
         }
       }
+    }
+  }
+
+  // Process trailing line when stream ends without final newline.
+  const lastLine = buffer.trim()
+  if (lastLine.startsWith('data: ')) {
+    const evt = parseData(lastLine.slice(6))
+    if (evt) {
+      yield evt
     }
   }
 }

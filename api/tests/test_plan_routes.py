@@ -43,6 +43,31 @@ async def test_list_workouts_with_date_filters():
 
 
 @pytest.mark.asyncio
+async def test_list_activities():
+    """GET /api/v1/plan/activities should return a list."""
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        resp = await client.get("/api/v1/plan/activities")
+    assert resp.status_code == 200
+    assert isinstance(resp.json(), list)
+
+
+@pytest.mark.asyncio
+async def test_list_activities_with_date_filters():
+    """GET /api/v1/plan/activities with date params should work."""
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        resp = await client.get(
+            "/api/v1/plan/activities",
+            params={"start_date": "2026-01-01", "end_date": "2026-12-31"},
+        )
+    assert resp.status_code == 200
+    assert isinstance(resp.json(), list)
+
+
+@pytest.mark.asyncio
 async def test_update_workout_not_found():
     """PUT /api/v1/plan/workouts/:id with bad ID should return 404."""
     fake_id = "00000000-0000-0000-0000-000000000000"

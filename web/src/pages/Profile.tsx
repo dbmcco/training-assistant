@@ -10,6 +10,7 @@ import type {
   PersonalRecord,
   GearItem,
 } from '../api/types'
+import { formatDistanceFromKilometers } from '../utils/units'
 
 function BiometricCard({
   label,
@@ -64,13 +65,13 @@ function BiometricsSection({
 
   return (
     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-      <BiometricCard label="Weight" value={biometrics.weight_kg} unit="kg" />
+      <BiometricCard label="Weight" value={biometrics.weight_kg ? Math.round(biometrics.weight_kg * 2.205) : null} unit="lbs" />
       <BiometricCard label="Body Fat" value={biometrics.body_fat_pct} unit="%" />
-      <BiometricCard label="Muscle Mass" value={biometrics.muscle_mass_kg} unit="kg" />
+      <BiometricCard label="Muscle Mass" value={biometrics.muscle_mass_kg ? Math.round(biometrics.muscle_mass_kg * 2.205) : null} unit="lbs" />
       <BiometricCard label="BMI" value={biometrics.bmi} />
       <BiometricCard label="Fitness Age" value={biometrics.fitness_age} unit="yrs" />
       <BiometricCard label="LT Heart Rate" value={biometrics.lactate_threshold_hr} unit="bpm" />
-      <BiometricCard label="LT Pace" value={biometrics.lactate_threshold_pace} unit="/km" />
+      <BiometricCard label="LT Pace" value={biometrics.lactate_threshold_pace ? (() => { const mi = biometrics.lactate_threshold_pace! * 1.60934; return `${Math.floor(mi / 60)}:${String(Math.round(mi % 60)).padStart(2, '0')}`; })() : null} unit="/mi" />
       <BiometricCard label="Cycling FTP" value={biometrics.cycling_ftp} unit="W" />
     </div>
   )
@@ -83,6 +84,23 @@ function RecordsSection({
   records: PersonalRecord[] | undefined
   isLoading: boolean
 }) {
+  const recordTypeLabel = (value: string) =>
+    value
+      .replace(/_/g, ' ')
+      .replace(/\bkm\b/gi, 'K')
+      .replace(/\bmi\b/gi, 'Mile')
+
+  const activityLabel = (value: string) => value.replace(/_/g, ' ')
+
+  const unitHint = (record: PersonalRecord) => {
+    if (record.value_kind === 'duration') return 'time'
+    if (record.value_kind === 'distance') return 'distance'
+    return ''
+  }
+
+  const displayValue = (record: PersonalRecord) =>
+    record.display_value ?? `${record.value.toFixed(2).replace(/\.00$/, '')}`
+
   if (isLoading) {
     return (
       <div className="rounded-xl bg-gray-900 border border-gray-800 overflow-hidden animate-pulse">
@@ -122,13 +140,18 @@ function RecordsSection({
           {records.map((record) => (
             <tr key={record.id} className="hover:bg-gray-800/30 transition-colors">
               <td className="px-4 py-3 text-gray-300 capitalize">
-                {record.activity_type.replace(/_/g, ' ')}
+                {activityLabel(record.activity_type)}
               </td>
               <td className="px-4 py-3 text-gray-400 capitalize">
-                {record.record_type.replace(/_/g, ' ')}
+                {recordTypeLabel(record.record_type)}
               </td>
               <td className="px-4 py-3 text-right text-gray-100 font-medium">
-                {record.value}
+                <div>{displayValue(record)}</div>
+                {unitHint(record) && (
+                  <div className="text-[11px] text-gray-500 uppercase tracking-wide mt-0.5">
+                    {unitHint(record)}
+                  </div>
+                )}
               </td>
               <td className="px-4 py-3 text-right text-gray-500">
                 {record.recorded_at
@@ -202,9 +225,8 @@ function GearSection({
                   {item.total_distance_km != null && (
                     <span>
                       <span className="text-gray-300 font-medium">
-                        {Math.round(item.total_distance_km).toLocaleString()}
-                      </span>{' '}
-                      km
+                        {formatDistanceFromKilometers(item.total_distance_km, item.gear_type)}
+                      </span>
                     </span>
                   )}
                   {item.total_activities != null && (

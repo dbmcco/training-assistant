@@ -13,13 +13,24 @@ interface LoadTrendProps {
   loadTrend: LoadTrendEntry[]
 }
 
+function formatWeekLabel(weekStart: string): string {
+  const parts = weekStart.split('-').map(Number)
+  if (parts.length !== 3 || parts.some((p) => Number.isNaN(p))) {
+    return weekStart
+  }
+  const [year, month, day] = parts
+  // Parse as a local calendar date to avoid UTC->local day shifts.
+  const localDate = new Date(year, month - 1, day)
+  return localDate.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+  })
+}
+
 export default function LoadTrend({ loadTrend }: LoadTrendProps) {
   const data = loadTrend.map((entry) => ({
     ...entry,
-    label: new Date(entry.week_start).toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-    }),
+    label: formatWeekLabel(entry.week_start),
   }))
 
   return (

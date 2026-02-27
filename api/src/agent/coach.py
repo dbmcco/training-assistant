@@ -9,11 +9,12 @@ discipline balance, recovery state, active alerts) informed by Matt Wilpers'
 coaching methodology.
 """
 
+import logging
 from datetime import date, datetime, timedelta, timezone
 from uuid import uuid4
 
 import anthropic
-from sqlalchemy import select, func, and_
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.agent.personality import (
@@ -30,13 +31,79 @@ from src.db.models import (
     AthleteBiometrics,
     AthleteProfile,
     Conversation,
-    GarminActivity,
     GarminDailySummary,
     Message,
     Race,
+    RecommendationChange,
 )
+from src.services.memory_store import (
+    search_relevant_memories,
+    sync_missing_conversation_memories,
+)
+from src.services.recommendations import recommendation_table_available
 
 client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
+logger = logging.getLogger(__name__)
+RECENT_DECISION_CONTEXT_LIMIT = 5
+
+
+async def _uses_legacy_conversation_schema(db: AsyncSession) -> bool:
+    """Detect legacy conversations schema from shared PAIA tables."""
+    result = await db.execute(
+        text(
+            """
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_name = 'conversations'
+              AND column_name IN ('channel_id', 'assistant_id', 'date')
+            """
+        )
+    )
+    cols = {row[0] for row in result.all()}
+    return {"channel_id", "assistant_id", "date"}.issubset(cols)
+
+
+async def _legacy_conversation_defaults(
+    db: AsyncSession,
+) -> tuple[str, str] | None:
+    """Find channel/assistant defaults for legacy conversation inserts."""
+    latest = await db.execute(
+        text(
+            """
+            SELECT channel_id, assistant_id
+            FROM conversations
+            ORDER BY created_at DESC
+            LIMIT 1
+            """
+        )
+    )
+    row = latest.first()
+    if row and row[0] and row[1]:
+        return str(row[0]), str(row[1])
+
+    channel_id = await db.execute(
+        text(
+            """
+            SELECT id
+            FROM channels
+            WHERE key = 'dm:paia'
+            LIMIT 1
+            """
+        )
+    )
+    channel_value = channel_id.scalar_one_or_none()
+    if channel_value is None:
+        fallback_channel = await db.execute(
+            text("SELECT id FROM channels ORDER BY created_at ASC LIMIT 1")
+        )
+        channel_value = fallback_channel.scalar_one_or_none()
+
+    assistant_id = await db.execute(text("SELECT system_default_assistant_id()"))
+    assistant_value = assistant_id.scalar_one_or_none()
+
+    if channel_value is None or assistant_value is None:
+        return None
+    return str(channel_value), str(assistant_value)
 
 
 async def _build_dynamic_context(db: AsyncSession) -> dict:
@@ -157,6 +224,98 @@ async def _build_dynamic_context(db: AsyncSession) -> dict:
     }
 
 
+async def _resolve_conversation_id(
+    db: AsyncSession, requested_conversation_id: str | None
+) -> str | None:
+    """Use requested conversation_id, else continue the latest conversation."""
+    if requested_conversation_id:
+        return requested_conversation_id
+
+    result = await db.execute(
+        select(Conversation.id)
+        .order_by(
+            Conversation.updated_at.desc().nullslast(),
+            Conversation.created_at.desc().nullslast(),
+        )
+        .limit(1)
+    )
+    latest_id = result.scalar_one_or_none()
+    return str(latest_id) if latest_id else None
+
+
+async def _load_conversation_history(
+    db: AsyncSession,
+    conversation_id: str | None,
+    max_messages: int,
+) -> list[dict]:
+    if not conversation_id:
+        return []
+
+    result = await db.execute(
+        select(Message)
+        .where(Message.conversation_id == conversation_id)
+        .order_by(Message.created_at.desc())
+        .limit(max_messages)
+    )
+    recent = list(result.scalars().all())
+    recent.reverse()
+    return [{"role": msg.role, "content": msg.content} for msg in recent]
+
+
+async def _build_recent_decisions_context(db: AsyncSession) -> str:
+    if not await recommendation_table_available(db):
+        return ""
+
+    result = await db.execute(
+        select(RecommendationChange)
+        .where(RecommendationChange.status != "pending")
+        .order_by(
+            RecommendationChange.decided_at.desc().nullslast(),
+            RecommendationChange.created_at.desc(),
+        )
+        .limit(RECENT_DECISION_CONTEXT_LIMIT)
+    )
+    rows = result.scalars().all()
+    if not rows:
+        return ""
+
+    lines = ["## Recent Recommendation Decisions"]
+    for row in rows:
+        when = row.decided_at.date().isoformat() if row.decided_at else "unknown-date"
+        proposed = row.proposed_workout or {}
+        workout_type = proposed.get("workout_type") or "session change"
+        discipline = proposed.get("discipline") or "unknown"
+        date_text = row.workout_date.isoformat() if row.workout_date else "unknown-date"
+        notes = row.decision_notes or row.requested_changes or ""
+        note_suffix = f" — notes: {notes}" if notes else ""
+        lines.append(
+            f"- {when}: {row.status} {discipline} {workout_type} on {date_text}{note_suffix}"
+        )
+    return "\n".join(lines)
+
+
+def _format_memory_context(memories: list[dict]) -> str:
+    if not memories:
+        return ""
+
+    lines = ["## Long-Term Memory (retrieved)"]
+    for memory in memories:
+        created_at = memory.get("created_at")
+        when = (
+            created_at.date().isoformat()
+            if hasattr(created_at, "date")
+            else "unknown-date"
+        )
+        role = str(memory.get("role") or "note")
+        content = str(memory.get("content") or "").strip()
+        if not content:
+            continue
+        if len(content) > 260:
+            content = f"{content[:260].rstrip()}..."
+        lines.append(f"- {when} [{role}] {content}")
+    return "\n".join(lines) if len(lines) > 1 else ""
+
+
 async def run_coach(
     user_message: str,
     conversation_id: str | None,
@@ -195,25 +354,49 @@ async def run_coach(
     # ------------------------------------------------------------------
     # 3. Build system prompt
     # ------------------------------------------------------------------
+    conversation_id = await _resolve_conversation_id(db, conversation_id)
+    if conversation_id:
+        try:
+            await sync_missing_conversation_memories(
+                db,
+                conversation_id=conversation_id,
+            )
+            await db.commit()
+        except Exception:
+            await db.rollback()
+            logger.exception("Failed to sync missing conversation memories")
+
+    recent_decisions_context = await _build_recent_decisions_context(db)
+    memory_context = ""
+    try:
+        memories = await search_relevant_memories(
+            db,
+            user_message,
+            limit=settings.coach_memory_retrieval_limit,
+        )
+        memory_context = _format_memory_context(memories)
+    except Exception:
+        logger.exception("Failed to retrieve long-term memory context")
+
     system_prompt = build_system_prompt(
         athlete_profile={"notes": profile.notes} if profile else None,
         view_context=view_context,
         races=ctx["races"],
         athlete_context=athlete_context_str,
     )
+    if recent_decisions_context:
+        system_prompt = f"{system_prompt}\n\n{recent_decisions_context}"
+    if memory_context:
+        system_prompt = f"{system_prompt}\n\n{memory_context}"
 
     # ------------------------------------------------------------------
     # 4. Load conversation history
     # ------------------------------------------------------------------
-    history: list[dict] = []
-    if conversation_id:
-        msg_result = await db.execute(
-            select(Message)
-            .where(Message.conversation_id == conversation_id)
-            .order_by(Message.created_at)
-        )
-        for msg in msg_result.scalars().all():
-            history.append({"role": msg.role, "content": msg.content})
+    history = await _load_conversation_history(
+        db,
+        conversation_id,
+        max_messages=max(2, settings.coach_prompt_history_messages),
+    )
 
     messages: list[dict] = history + [{"role": "user", "content": user_message}]
 
@@ -274,11 +457,15 @@ async def run_coach(
             break
 
     # ------------------------------------------------------------------
-    # 6. Persist conversation
+    # 6. Persist conversation (best-effort) and always terminate stream
     # ------------------------------------------------------------------
     now = datetime.now(timezone.utc)
+    if not conversation_id:
+        conversation_id = str(uuid4())
 
-    if conversation_id:
+    persistence_error = False
+    try:
+        uses_legacy_schema = await _uses_legacy_conversation_schema(db)
         conv_result = await db.execute(
             select(Conversation).where(Conversation.id == conversation_id)
         )
@@ -286,43 +473,118 @@ async def run_coach(
         if conv:
             conv.updated_at = now
         else:
-            # Conversation ID was provided but doesn't exist — create it
             title = user_message[:50]
-            conv = Conversation(
-                id=conversation_id, title=title, created_at=now, updated_at=now
+            if uses_legacy_schema:
+                defaults = await _legacy_conversation_defaults(db)
+                if defaults is None:
+                    raise RuntimeError(
+                        "Cannot resolve legacy conversation defaults (channel_id/assistant_id)"
+                    )
+                channel_id, assistant_id = defaults
+                existing_legacy = await db.execute(
+                    text(
+                        """
+                        SELECT id
+                        FROM conversations
+                        WHERE channel_id = :channel_id
+                          AND assistant_id = :assistant_id
+                          AND date = :date
+                        ORDER BY created_at DESC
+                        LIMIT 1
+                        """
+                    ),
+                    {
+                        "channel_id": channel_id,
+                        "assistant_id": assistant_id,
+                        "date": now.date(),
+                    },
+                )
+                legacy_id = existing_legacy.scalar_one_or_none()
+                if legacy_id is not None:
+                    conversation_id = str(legacy_id)
+                    await db.execute(
+                        text(
+                            """
+                            UPDATE conversations
+                            SET title = :title, updated_at = :updated_at
+                            WHERE id = :id
+                            """
+                        ),
+                        {
+                            "id": conversation_id,
+                            "title": title,
+                            "updated_at": now,
+                        },
+                    )
+                else:
+                    await db.execute(
+                        text(
+                            """
+                            INSERT INTO conversations (
+                                id, channel_id, assistant_id, date, title, created_at, updated_at
+                            ) VALUES (
+                                :id, :channel_id, :assistant_id, :date, :title, :created_at, :updated_at
+                            )
+                            """
+                        ),
+                        {
+                            "id": conversation_id,
+                            "channel_id": channel_id,
+                            "assistant_id": assistant_id,
+                            "date": now.date(),
+                            "title": title,
+                            "created_at": now,
+                            "updated_at": now,
+                        },
+                    )
+            else:
+                conv = Conversation(
+                    id=conversation_id, title=title, created_at=now, updated_at=now
+                )
+                db.add(conv)
+
+        # Save user message
+        db.add(
+            Message(
+                conversation_id=conversation_id,
+                role="user",
+                content=user_message,
+                created_at=now,
             )
-            db.add(conv)
+        )
+
+        # Save assistant response
+        db.add(
+            Message(
+                conversation_id=conversation_id,
+                role="assistant",
+                content=full_response,
+                created_at=now,
+            )
+        )
+
+        await db.commit()
+    except Exception:
+        persistence_error = True
+        await db.rollback()
+        logger.exception("Failed to persist chat conversation/message")
     else:
-        conversation_id = str(uuid4())
-        title = user_message[:50]
-        conv = Conversation(
-            id=conversation_id, title=title, created_at=now, updated_at=now
-        )
-        db.add(conv)
-
-    # Save user message
-    db.add(
-        Message(
-            conversation_id=conversation_id,
-            role="user",
-            content=user_message,
-            created_at=now,
-        )
-    )
-
-    # Save assistant response
-    db.add(
-        Message(
-            conversation_id=conversation_id,
-            role="assistant",
-            content=full_response,
-            created_at=now,
-        )
-    )
-
-    await db.commit()
+        if conversation_id:
+            try:
+                await sync_missing_conversation_memories(
+                    db,
+                    conversation_id=conversation_id,
+                )
+                await db.commit()
+            except Exception:
+                await db.rollback()
+                logger.exception("Failed to store long-term memory embeddings")
 
     yield {
         "event": "done",
-        "data": {"conversation_id": conversation_id, "content": full_response},
+        "data": {
+            "conversation_id": conversation_id,
+            "content": full_response,
+            "persisted": not persistence_error,
+        },
     }
