@@ -90,8 +90,14 @@ export async function fetchDashboardWeekly(): Promise<DashboardWeekly> {
   const adherence = {
     total: adh.total_planned ?? adh.total ?? 0,
     completed: adh.completed ?? 0,
+    strict_completed: adh.strict_completed ?? adh.completed ?? 0,
+    aligned_substitutions: adh.aligned_substitutions ?? 0,
+    due_total: adh.due_planned ?? adh.total_planned ?? adh.total ?? 0,
+    pending_future: adh.pending_future ?? 0,
     missed: adh.missed ?? 0,
     rate: adh.completion_pct != null ? adh.completion_pct / 100 : adh.rate ?? 0,
+    strict_rate:
+      adh.strict_completion_pct != null ? adh.strict_completion_pct / 100 : undefined,
   }
 
   const load_trend = (raw.load_trend ?? []).map(
@@ -150,8 +156,14 @@ export async function fetchPlanAdherence(
   return {
     total: raw.total_planned ?? raw.total ?? 0,
     completed: raw.completed ?? 0,
+    strict_completed: raw.strict_completed ?? raw.completed ?? 0,
+    aligned_substitutions: raw.aligned_substitutions ?? 0,
+    due_total: raw.due_planned ?? raw.total_planned ?? raw.total ?? 0,
+    pending_future: raw.pending_future ?? 0,
     missed: raw.missed ?? 0,
     rate: raw.completion_pct != null ? raw.completion_pct / 100 : raw.rate ?? 0,
+    strict_rate:
+      raw.strict_completion_pct != null ? raw.strict_completion_pct / 100 : undefined,
   }
 }
 

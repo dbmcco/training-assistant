@@ -63,13 +63,15 @@ export default function Plan() {
 
   const atAGlance = useMemo(() => {
     const planned = (workouts ?? []).length
-    const done = (activities ?? []).length
+    const done = adherence?.completed ?? (activities ?? []).length
+    const due = adherence?.due_total ?? planned
     return {
       planned,
+      due,
       done,
-      completionPct: planned > 0 ? Math.round((done / planned) * 100) : 0,
+      completionPct: due > 0 ? Math.round((done / due) * 100) : 0,
     }
-  }, [workouts, activities])
+  }, [workouts, activities, adherence])
 
   const hasQueryError = workoutsError || adherenceError || activitiesError
 
@@ -119,7 +121,7 @@ export default function Plan() {
           <div className="text-sm font-semibold text-emerald-300">{atAGlance.done}</div>
         </div>
         <div className="rounded-lg bg-gray-900 border border-gray-800 px-3 py-2">
-          <div className="text-[11px] text-gray-500">Done vs Plan</div>
+          <div className="text-[11px] text-gray-500">On Plan vs Due</div>
           <div className="text-sm font-semibold text-gray-200">{atAGlance.completionPct}%</div>
         </div>
       </div>

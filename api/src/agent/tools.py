@@ -441,15 +441,27 @@ async def _get_plan_adherence(db: AsyncSession, period: str = "this_week") -> st
         end = today
 
     stats = await get_plan_adherence(db, start, end)
+    strict_completed = stats.get("strict_completed", stats.get("completed", 0))
+    aligned_substitutions = stats.get("aligned_substitutions", 0)
+    due_planned = stats.get("due_planned", stats.get("total_planned", 0))
+    pending_future = stats.get("pending_future", 0)
+    strict_pct = stats.get("strict_completion_pct")
 
     lines = [
         f"Plan Adherence ({period.replace('_', ' ')}: {start} to {end}):",
         f"  Total planned: {stats['total_planned']}",
-        f"  Completed: {stats['completed']}",
+        f"  Due so far: {due_planned}",
+        f"  On-plan completed: {stats['completed']}",
+        f"  Strict completed: {strict_completed}",
+        f"  Aligned substitutions: {aligned_substitutions}",
         f"  Missed: {stats['missed']}",
         f"  Skipped: {stats['skipped']}",
         f"  Completion rate: {stats['completion_pct']}%",
     ]
+    if strict_pct is not None:
+        lines.append(f"  Strict completion rate: {strict_pct}%")
+    if pending_future:
+        lines.append(f"  Pending future workouts: {pending_future}")
     return "\n".join(lines)
 
 

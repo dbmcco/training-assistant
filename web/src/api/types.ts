@@ -84,8 +84,13 @@ export interface VolumeEntry {
 export interface Adherence {
   total: number
   completed: number
+  strict_completed?: number
+  aligned_substitutions?: number
+  due_total?: number
+  pending_future?: number
   missed: number
   rate: number
+  strict_rate?: number
 }
 
 export interface LoadTrendEntry {
