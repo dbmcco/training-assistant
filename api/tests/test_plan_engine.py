@@ -7,6 +7,7 @@ from src.db.models import GarminActivity, PlannedWorkout
 from src.db.connection import async_session
 from src.services.plan_engine import (
     _index_activities_by_day_and_discipline,
+    _minimum_expected_seconds,
     _reconcile_due_workouts,
     get_today_workout,
     get_upcoming_workouts,
@@ -108,3 +109,16 @@ def test_reconcile_due_workouts_does_not_double_count_single_activity():
 
     assert reconciliation["aligned_substitutions"] == 1
     assert reconciliation["missed"] == 1
+
+
+def test_minimum_expected_seconds_treats_large_planned_duration_as_seconds():
+    workout = PlannedWorkout(
+        date=date(2026, 2, 28),
+        discipline="bike",
+        target_duration=4020,  # Garmin seconds; should normalize to 67 minutes.
+        status="upcoming",
+    )
+
+    expected_seconds = _minimum_expected_seconds(workout)
+
+    assert expected_seconds == 2412.0

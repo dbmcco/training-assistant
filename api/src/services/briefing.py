@@ -27,6 +27,7 @@ from src.services.recommendations import (
     serialize_recommendation,
 )
 from src.services.units import format_distance_from_meters
+from src.services.workout_duration import format_planned_duration
 
 client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
 
@@ -142,7 +143,7 @@ async def gather_context(db: AsyncSession) -> dict:
         for w in workouts_today:
             line = f"{w.discipline}: {w.workout_type or w.description or 'Scheduled'}"
             if w.target_duration:
-                line += f" ({w.target_duration}min)"
+                line += f" ({format_planned_duration(w.target_duration)})"
             wo_lines.append(line)
         today_workout_text = "\n".join(wo_lines)
     else:

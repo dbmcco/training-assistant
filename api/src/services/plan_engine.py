@@ -6,6 +6,10 @@ from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db.models import GarminActivity, PlannedWorkout, TrainingPlan
+from src.services.workout_duration import (
+    normalize_planned_duration_minutes,
+    planned_duration_seconds,
+)
 
 
 def _normalize_discipline(value: str | None) -> str:
@@ -54,7 +58,7 @@ def _workout_dedupe_key(workout: PlannedWorkout) -> tuple:
         _normalize_discipline(workout.discipline),
         (workout.workout_type or "").strip().lower(),
         (workout.description or "").strip().lower(),
-        int(workout.target_duration or 0),
+        int(normalize_planned_duration_minutes(workout.target_duration) or 0),
         round(float(workout.target_distance or 0.0), 3),
     )
 
@@ -102,8 +106,9 @@ def _dedupe_workouts(workouts: list[PlannedWorkout]) -> list[PlannedWorkout]:
 
 def _minimum_expected_seconds(workout: PlannedWorkout) -> float:
     # 60% keeps substitutions realistic while allowing imperfect matches (e.g., 120m plan vs 90m bike).
-    if workout.target_duration and workout.target_duration > 0:
-        return max(float(workout.target_duration) * 60.0 * 0.6, 10.0 * 60.0)
+    duration_seconds = planned_duration_seconds(workout.target_duration)
+    if duration_seconds and duration_seconds > 0:
+        return max(duration_seconds * 0.6, 10.0 * 60.0)
 
     defaults_minutes = {
         "run": 20,
@@ -202,7 +207,7 @@ async def get_today_workout(session: AsyncSession) -> dict | None:
         "date": workout.date.isoformat(),
         "discipline": workout.discipline,
         "workout_type": workout.workout_type,
-        "target_duration": workout.target_duration,
+        "target_duration": normalize_planned_duration_minutes(workout.target_duration),
         "target_distance": workout.target_distance,
         "description": workout.description,
         "status": workout.status,
@@ -232,7 +237,7 @@ async def get_upcoming_workouts(
             "date": w.date.isoformat(),
             "discipline": w.discipline,
             "workout_type": w.workout_type,
-            "target_duration": w.target_duration,
+            "target_duration": normalize_planned_duration_minutes(w.target_duration),
             "description": w.description,
             "status": w.status,
         }

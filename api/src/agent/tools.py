@@ -24,6 +24,7 @@ from src.services.units import (
     format_pace_per_mile,
 )
 from src.services.recovery_time import normalize_recovery_time_hours
+from src.services.workout_duration import format_planned_duration
 
 TOOL_DEFINITIONS: list[dict] = [
     {
@@ -544,7 +545,7 @@ async def _get_upcoming_workouts(db: AsyncSession, count: int = 5) -> str:
         if w.get("workout_type"):
             line += f" ({w['workout_type']})"
         if w.get("target_duration"):
-            line += f" {w['target_duration']}min"
+            line += f" {format_planned_duration(w['target_duration'])}"
         if w.get("description"):
             line += f": {w['description']}"
         lines.append(line)
@@ -622,7 +623,7 @@ async def _modify_workout(db: AsyncSession, workout_id: str, reason: str) -> str
         f"  Date: {workout.date}",
         f"  Discipline: {workout.discipline}",
         f"  Type: {workout.workout_type or 'Not specified'}",
-        f"  Target duration: {workout.target_duration or 'Not specified'}min",
+        f"  Target duration: {format_planned_duration(workout.target_duration)}",
         f"  Description: {workout.description or 'None'}",
         f"  Status: {workout.status}",
         "",
