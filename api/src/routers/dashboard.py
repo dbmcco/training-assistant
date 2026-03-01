@@ -11,8 +11,10 @@ from src.db.models import DailyBriefing, GarminDailySummary, Race
 from src.services.analytics import (
     activity_stats,
     activity_type_breakdown,
+    build_trend_coach_summary,
     coaching_analysis,
     daily_metric_trend,
+    trend_events,
     trend_data_window,
     trend_metric_options,
     training_load_trend,
@@ -222,6 +224,8 @@ async def dashboard_trends(
     activity_types = await activity_type_breakdown(db, start, end)
     metric_data = await daily_metric_trend(db, start, end, metric)
     analysis = await coaching_analysis(db, start, end, volume, stats)
+    events = await trend_events(db, start, end)
+    coach_summary = build_trend_coach_summary(metric_data, analysis, events)
 
     return {
         "start": start.isoformat(),
@@ -241,4 +245,6 @@ async def dashboard_trends(
         "activity_types": activity_types,
         "stats": stats,
         "analysis": analysis,
+        "events": events,
+        "coach_summary": coach_summary,
     }

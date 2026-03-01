@@ -115,6 +115,8 @@ async def test_dashboard_trends_default():
     assert "activity_types" in data
     assert "stats" in data
     assert "analysis" in data
+    assert "events" in data
+    assert "coach_summary" in data
     assert "insights" in data["analysis"]
 
 

@@ -133,6 +133,20 @@ export interface ActivityTypeStat {
   discipline: string
 }
 
+export interface TrendEvent {
+  date: string
+  type: 'race' | 'session' | 'recovery'
+  title: string
+  detail: string
+  level: 'good' | 'watch' | 'warning'
+}
+
+export interface TrendCoachSummary {
+  headline: string
+  bullets: string[]
+  recommended_action: string
+}
+
 export interface CoachInsight {
   level: 'good' | 'watch' | 'warning'
   title: string
@@ -209,6 +223,8 @@ export interface DashboardTrends {
     avg_hr: number | null
   }
   analysis: CoachAnalysis
+  events: TrendEvent[]
+  coach_summary: TrendCoachSummary | null
 }
 
 export interface Race {

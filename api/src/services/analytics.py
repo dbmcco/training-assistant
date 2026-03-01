@@ -7,7 +7,7 @@ from typing import Any
 from sqlalchemy import select, func, and_, case, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.db.models import GarminActivity, GarminDailySummary
+from src.db.models import GarminActivity, GarminDailySummary, Race
 
 
 # Map Garmin activity_type values to triathlon disciplines
@@ -364,6 +364,233 @@ def _window_delta(values: list[float | None]) -> float | None:
     if not recent or not previous:
         return None
     return round((_avg(recent) or 0.0) - (_avg(previous) or 0.0), 2)
+
+
+def _format_duration_from_seconds(seconds: float | None) -> str:
+    if seconds is None or seconds <= 0:
+        return "0m"
+    minutes = int(round(seconds / 60.0))
+    if minutes < 60:
+        return f"{minutes}m"
+    hours = minutes // 60
+    remainder = minutes % 60
+    return f"{hours}h {remainder}m" if remainder else f"{hours}h"
+
+
+def _format_metric_value(value: float | None, unit: str) -> str:
+    if value is None:
+        return "--"
+    numeric = float(value)
+    if numeric.is_integer():
+        core = str(int(numeric))
+    else:
+        core = f"{numeric:.1f}"
+    if unit in {"", "score", "load"}:
+        return core
+    return f"{core} {unit}"
+
+
+def _insight_severity(level: str) -> int:
+    return {"warning": 3, "watch": 2, "good": 1}.get(level, 0)
+
+
+async def trend_events(
+    session: AsyncSession,
+    start: date,
+    end: date,
+    limit: int = 12,
+) -> list[dict[str, Any]]:
+    """Return contextual events for trend chart annotation."""
+    bounded_limit = max(1, min(limit, 30))
+    events: list[dict[str, Any]] = []
+
+    # Race events.
+    race_result = await session.execute(
+        select(Race)
+        .where(and_(Race.date >= start, Race.date <= end))
+        .order_by(Race.date.asc())
+        .limit(8)
+    )
+    for race in race_result.scalars().all():
+        events.append(
+            {
+                "date": race.date.isoformat(),
+                "type": "race",
+                "title": race.name,
+                "detail": f"{race.distance_type} race day",
+                "level": "good",
+            }
+        )
+
+    start_dt = datetime(start.year, start.month, start.day, tzinfo=timezone.utc)
+    end_dt = datetime(end.year, end.month, end.day, tzinfo=timezone.utc) + timedelta(days=1)
+
+    # Long sessions (>= 90 minutes) to explain spikes in trend lines.
+    long_result = await session.execute(
+        select(
+            func.date(GarminActivity.start_time).label("activity_day"),
+            GarminActivity.activity_type,
+            GarminActivity.duration_seconds,
+            GarminActivity.name,
+        )
+        .where(
+            and_(
+                GarminActivity.start_time >= start_dt,
+                GarminActivity.start_time < end_dt,
+                GarminActivity.duration_seconds >= 5400,
+            )
+        )
+        .order_by(GarminActivity.start_time.desc())
+        .limit(30)
+    )
+
+    seen_long_keys: set[tuple[date, str]] = set()
+    for row in long_result:
+        if row.activity_day is None:
+            continue
+        activity_day = row.activity_day
+        if isinstance(activity_day, datetime):
+            activity_day = activity_day.date()
+        discipline = _classify_discipline(row.activity_type)
+        key = (activity_day, discipline)
+        if key in seen_long_keys:
+            continue
+        seen_long_keys.add(key)
+        session_name = row.name or row.activity_type or "session"
+        events.append(
+            {
+                "date": activity_day.isoformat(),
+                "type": "session",
+                "title": f"Long {discipline}",
+                "detail": f"{session_name} ({_format_duration_from_seconds(row.duration_seconds)})",
+                "level": "watch" if (row.duration_seconds or 0) >= 7200 else "good",
+            }
+        )
+        if len(seen_long_keys) >= 6:
+            break
+
+    # Recovery dips.
+    recovery_result = await session.execute(
+        select(
+            GarminDailySummary.calendar_date,
+            GarminDailySummary.training_readiness_score,
+            GarminDailySummary.sleep_score,
+        )
+        .where(
+            and_(
+                GarminDailySummary.calendar_date >= start,
+                GarminDailySummary.calendar_date <= end,
+                or_(
+                    GarminDailySummary.training_readiness_score < 40,
+                    GarminDailySummary.sleep_score < 55,
+                ),
+            )
+        )
+        .order_by(GarminDailySummary.calendar_date.desc())
+        .limit(8)
+    )
+
+    seen_recovery_dates: set[date] = set()
+    for row in recovery_result:
+        if row.calendar_date in seen_recovery_dates:
+            continue
+        seen_recovery_dates.add(row.calendar_date)
+        parts: list[str] = []
+        if row.training_readiness_score is not None:
+            parts.append(f"readiness {int(row.training_readiness_score)}")
+        if row.sleep_score is not None:
+            parts.append(f"sleep {int(row.sleep_score)}")
+        detail = ", ".join(parts) if parts else "low recovery signal"
+        events.append(
+            {
+                "date": row.calendar_date.isoformat(),
+                "type": "recovery",
+                "title": "Recovery dip",
+                "detail": detail,
+                "level": "warning",
+            }
+        )
+
+    deduped: list[dict[str, Any]] = []
+    seen_keys: set[tuple[str, str, str]] = set()
+    for event in sorted(events, key=lambda item: item["date"]):
+        key = (event["date"], event["type"], event["title"])
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        deduped.append(event)
+
+    return deduped[:bounded_limit]
+
+
+def build_trend_coach_summary(
+    metric_data: dict[str, Any],
+    analysis: dict[str, Any],
+    events: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Create concise AI-style summary text for analysis page."""
+    metric_label = metric_data.get("label", "Metric")
+    unit = metric_data.get("unit", "")
+    summary = metric_data.get("summary", {}) or {}
+    latest = summary.get("latest")
+    delta = summary.get("delta")
+
+    if delta is None:
+        trend_direction = "stable"
+    elif delta > 0:
+        trend_direction = "trending up"
+    elif delta < 0:
+        trend_direction = "trending down"
+    else:
+        trend_direction = "flat"
+
+    headline = (
+        f"{metric_label} is {trend_direction} "
+        f"({ _format_metric_value(latest, unit) }) over this window."
+    )
+
+    insights = list(analysis.get("insights", []))
+    top_insight = None
+    if insights:
+        top_insight = sorted(
+            insights,
+            key=lambda item: _insight_severity(str(item.get("level", ""))),
+            reverse=True,
+        )[0]
+
+    load_management = analysis.get("load_management", {}) or {}
+    acwr = load_management.get("acwr")
+    acwr_band = load_management.get("acwr_band")
+    consistency = analysis.get("consistency", {}) or {}
+    consistency_pct = consistency.get("consistency_pct")
+
+    bullets: list[str] = []
+    if acwr is not None and acwr_band:
+        bullets.append(f"Load context: ACWR {acwr} ({acwr_band.replace('_', ' ')}).")
+    if consistency_pct is not None:
+        bullets.append(f"Consistency: {consistency_pct}% active training days in this range.")
+    if top_insight:
+        bullets.append(f"Key signal: {top_insight.get('title')} — {top_insight.get('detail')}")
+
+    if events:
+        recent_event = events[-1]
+        bullets.append(
+            f"Recent event: {recent_event.get('date')} {recent_event.get('title')} "
+            f"({recent_event.get('detail')})."
+        )
+
+    if top_insight and top_insight.get("level") == "warning":
+        recommended_action = "Back off intensity for 24-48h and re-check readiness/sleep before the next hard session."
+    elif acwr_band == "underloaded":
+        recommended_action = "Add one quality session this week to rebuild momentum while keeping recovery stable."
+    else:
+        recommended_action = "Stay consistent with the current structure and adjust only if recovery trends dip."
+
+    return {
+        "headline": headline,
+        "bullets": bullets[:3],
+        "recommended_action": recommended_action,
+    }
 
 
 async def coaching_analysis(
