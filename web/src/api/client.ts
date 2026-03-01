@@ -286,8 +286,14 @@ export async function fetchConversations(): Promise<Conversation[]> {
 
 export async function fetchConversation(
   conversationId: string,
+  options?: {
+    limit?: number
+  },
 ): Promise<ConversationDetail> {
-  const res = await fetchWithTimeout(`${BASE}/conversations/${conversationId}`)
+  const params = new URLSearchParams()
+  if (options?.limit != null) params.set('limit', String(options.limit))
+  const suffix = params.toString() ? `?${params.toString()}` : ''
+  const res = await fetchWithTimeout(`${BASE}/conversations/${conversationId}${suffix}`)
   if (!res.ok) throw new Error(`Conversation fetch failed: ${res.status}`)
   return res.json()
 }

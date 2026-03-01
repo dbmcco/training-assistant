@@ -26,7 +26,8 @@ interface ChatPanelProps {
 }
 
 const CONVERSATION_STORAGE_KEY = 'training-assistant-conversation-id'
-const DEFAULT_VISIBLE_MESSAGES = 40
+const DEFAULT_VISIBLE_MESSAGES = 12
+const CONVERSATION_FETCH_LIMIT = 120
 
 function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
@@ -135,7 +136,9 @@ export default function ChatPanel({ isOpen, onToggle }: ChatPanelProps) {
 
       if (persistedId) {
         try {
-          return await fetchConversation(persistedId)
+          return await fetchConversation(persistedId, {
+            limit: CONVERSATION_FETCH_LIMIT,
+          })
         } catch {
           // Continue to latest conversation fallback.
         }
@@ -146,7 +149,9 @@ export default function ChatPanel({ isOpen, onToggle }: ChatPanelProps) {
       if (!latest) {
         return null
       }
-      return fetchConversation(latest.id)
+      return fetchConversation(latest.id, {
+        limit: CONVERSATION_FETCH_LIMIT,
+      })
     },
     staleTime: 60_000,
   })
@@ -422,6 +427,22 @@ export default function ChatPanel({ isOpen, onToggle }: ChatPanelProps) {
     }
   }
 
+  function handleStartFreshChat() {
+    const latestBriefing = todayQuery.data?.briefing
+    if (typeof window !== 'undefined') {
+      window.localStorage.removeItem(CONVERSATION_STORAGE_KEY)
+    }
+    setConversationId(undefined)
+    setShowFullHistory(false)
+    if (latestBriefing) {
+      setMessages([briefingToMessage(latestBriefing)])
+      hasSeededBriefingRef.current = true
+      return
+    }
+    setMessages([])
+    hasSeededBriefingRef.current = false
+  }
+
   // Collapsed state: floating button (desktop only; mobile uses BottomNav)
   if (!isOpen) {
     return (
@@ -454,19 +475,29 @@ export default function ChatPanel({ isOpen, onToggle }: ChatPanelProps) {
           <div className="w-2 h-2 rounded-full bg-green-400" />
           <h2 className="text-sm font-semibold text-gray-100">Coach</h2>
         </div>
-        <button
-          onClick={onToggle}
-          className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:bg-gray-800 hover:text-gray-200 transition-colors"
-          aria-label="Minimize chat"
-        >
-          <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
-            <path
-              fillRule="evenodd"
-              d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
-              clipRule="evenodd"
-            />
-          </svg>
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={handleStartFreshChat}
+            className="rounded-lg border border-gray-700 px-2 py-1 text-[11px] text-gray-300 hover:bg-gray-800"
+            aria-label="Start a new chat"
+          >
+            New chat
+          </button>
+          <button
+            onClick={onToggle}
+            className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:bg-gray-800 hover:text-gray-200 transition-colors"
+            aria-label="Minimize chat"
+          >
+            <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
+              <path
+                fillRule="evenodd"
+                d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
+                clipRule="evenodd"
+              />
+            </svg>
+          </button>
+        </div>
       </div>
 
       {/* Messages */}

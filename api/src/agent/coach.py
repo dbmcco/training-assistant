@@ -251,15 +251,20 @@ async def _load_conversation_history(
     if not conversation_id:
         return []
 
+    bounded_limit = max(2, min(max_messages, 24))
     result = await db.execute(
         select(Message)
         .where(Message.conversation_id == conversation_id)
         .order_by(Message.created_at.desc())
-        .limit(max_messages)
+        .limit(bounded_limit)
     )
     recent = list(result.scalars().all())
     recent.reverse()
-    return [{"role": msg.role, "content": msg.content} for msg in recent]
+    return [
+        {"role": msg.role, "content": msg.content}
+        for msg in recent
+        if msg.role in {"user", "assistant"} and (msg.content or "").strip()
+    ]
 
 
 async def _build_recent_decisions_context(db: AsyncSession) -> str:
@@ -395,7 +400,7 @@ async def run_coach(
     history = await _load_conversation_history(
         db,
         conversation_id,
-        max_messages=max(2, settings.coach_prompt_history_messages),
+        max_messages=max(2, min(settings.coach_prompt_history_messages, 24)),
     )
 
     messages: list[dict] = history + [{"role": "user", "content": user_message}]

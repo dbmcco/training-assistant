@@ -5,7 +5,7 @@ import logging
 from datetime import datetime, timezone
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -72,7 +72,9 @@ async def list_conversations(db: AsyncSession = Depends(get_db)):
 
 @router.get("/conversations/{conversation_id}")
 async def get_conversation(
-    conversation_id: UUID, db: AsyncSession = Depends(get_db)
+    conversation_id: UUID,
+    limit: int = Query(default=120, ge=20, le=500),
+    db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(
         select(Conversation).where(Conversation.id == conversation_id)
@@ -84,9 +86,11 @@ async def get_conversation(
     msg_result = await db.execute(
         select(Message)
         .where(Message.conversation_id == conversation_id)
-        .order_by(Message.created_at)
+        .order_by(Message.created_at.desc())
+        .limit(limit)
     )
-    messages = msg_result.scalars().all()
+    messages = list(msg_result.scalars().all())
+    messages.reverse()
 
     data = _conversation_to_dict(conv)
     data["messages"] = [_message_to_dict(m) for m in messages]
