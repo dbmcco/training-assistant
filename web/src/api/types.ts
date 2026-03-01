@@ -147,6 +147,14 @@ export interface TrendCoachSummary {
   recommended_action: string
 }
 
+export interface ExecutiveSummary {
+  as_of: string
+  status_level: 'good' | 'watch' | 'warning'
+  status: string
+  summary: string
+  recommendations: string[]
+}
+
 export interface CoachInsight {
   level: 'good' | 'watch' | 'warning'
   title: string
@@ -225,6 +233,7 @@ export interface DashboardTrends {
   analysis: CoachAnalysis
   events: TrendEvent[]
   coach_summary: TrendCoachSummary | null
+  executive_summary: ExecutiveSummary | null
 }
 
 export interface Race {

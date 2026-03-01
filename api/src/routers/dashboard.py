@@ -11,6 +11,7 @@ from src.db.models import DailyBriefing, GarminDailySummary, Race
 from src.services.analytics import (
     activity_stats,
     activity_type_breakdown,
+    build_daily_executive_summary,
     build_trend_coach_summary,
     coaching_analysis,
     daily_metric_trend,
@@ -227,6 +228,23 @@ async def dashboard_trends(
     events = await trend_events(db, start, end)
     coach_summary = build_trend_coach_summary(metric_data, analysis, events)
 
+    executive_end = latest_data_date or date.today()
+    executive_start = executive_end - timedelta(days=27)
+    executive_volume = await weekly_volume_by_discipline(db, executive_start, executive_end)
+    executive_stats = await activity_stats(db, executive_start, executive_end)
+    executive_analysis = await coaching_analysis(
+        db, executive_start, executive_end, executive_volume, executive_stats
+    )
+    latest_summary_result = await db.execute(
+        select(GarminDailySummary)
+        .order_by(GarminDailySummary.calendar_date.desc())
+        .limit(1)
+    )
+    latest_summary = latest_summary_result.scalar_one_or_none()
+    executive_summary = build_daily_executive_summary(
+        executive_end, latest_summary, executive_analysis
+    )
+
     return {
         "start": start.isoformat(),
         "end": end.isoformat(),
@@ -247,4 +265,5 @@ async def dashboard_trends(
         "analysis": analysis,
         "events": events,
         "coach_summary": coach_summary,
+        "executive_summary": executive_summary,
     }

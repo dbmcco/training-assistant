@@ -117,7 +117,14 @@ async def test_dashboard_trends_default():
     assert "analysis" in data
     assert "events" in data
     assert "coach_summary" in data
+    assert "executive_summary" in data
     assert "insights" in data["analysis"]
+    executive_summary = data["executive_summary"]
+    assert "as_of" in executive_summary
+    assert "status_level" in executive_summary
+    assert "status" in executive_summary
+    assert "summary" in executive_summary
+    assert "recommendations" in executive_summary
 
 
 @pytest.mark.asyncio

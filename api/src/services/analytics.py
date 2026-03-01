@@ -593,6 +593,131 @@ def build_trend_coach_summary(
     }
 
 
+def build_daily_executive_summary(
+    as_of: date,
+    latest_summary: GarminDailySummary | None,
+    analysis: dict[str, Any],
+) -> dict[str, Any]:
+    """Create a daily executive status and recommendations block."""
+    readiness_score = (
+        int(latest_summary.training_readiness_score)
+        if latest_summary and latest_summary.training_readiness_score is not None
+        else None
+    )
+    sleep_score = (
+        int(latest_summary.sleep_score)
+        if latest_summary and latest_summary.sleep_score is not None
+        else None
+    )
+    body_battery = (
+        int(latest_summary.body_battery_at_wake)
+        if latest_summary and latest_summary.body_battery_at_wake is not None
+        else None
+    )
+
+    load_management = analysis.get("load_management", {}) or {}
+    acwr = load_management.get("acwr")
+    acwr_band = load_management.get("acwr_band")
+
+    recovery_trend = analysis.get("recovery_trend", {}) or {}
+    readiness_delta = recovery_trend.get("readiness_delta")
+    sleep_delta = recovery_trend.get("sleep_delta")
+
+    level: str = "good"
+    if (readiness_score is not None and readiness_score < 45) or acwr_band == "overreaching_risk":
+        level = "warning"
+    elif (
+        (readiness_score is not None and readiness_score < 65)
+        or acwr_band == "underloaded"
+        or (readiness_delta is not None and readiness_delta <= -8)
+        or (sleep_delta is not None and sleep_delta <= -5)
+    ):
+        level = "watch"
+
+    status_title_by_level = {
+        "good": "On Track",
+        "watch": "Monitor & Adjust",
+        "warning": "Recovery Priority",
+    }
+
+    summary_parts: list[str] = []
+    if readiness_score is not None:
+        summary_parts.append(f"Readiness {readiness_score}")
+    if sleep_score is not None:
+        summary_parts.append(f"Sleep {sleep_score}")
+    if body_battery is not None:
+        summary_parts.append(f"Body battery {body_battery}")
+    if acwr is not None:
+        band_text = f" ({str(acwr_band).replace('_', ' ')})" if acwr_band else ""
+        summary_parts.append(f"ACWR {acwr}{band_text}")
+
+    consistency_pct = analysis.get("consistency", {}).get("consistency_pct")
+    if consistency_pct is not None:
+        summary_parts.append(f"Consistency {consistency_pct}%")
+
+    summary_line = (
+        " | ".join(summary_parts)
+        if summary_parts
+        else "No complete daily summary data yet; using trend history where available."
+    )
+
+    recommendations: list[str] = []
+    if level == "warning":
+        recommendations.append(
+            "Prioritize recovery today: easy aerobic only or full rest before the next quality session."
+        )
+    if acwr_band == "overreaching_risk":
+        recommendations.append(
+            "Reduce volume/intensity for 24-48h and re-check readiness + sleep before resuming hard work."
+        )
+    elif acwr_band == "underloaded":
+        recommendations.append(
+            "Add one targeted quality session this week to rebuild load progressively."
+        )
+
+    discipline_balance = analysis.get("discipline_balance", {}) or {}
+    swim_pct = (discipline_balance.get("swim") or {}).get("pct")
+    if swim_pct is not None and swim_pct < 15:
+        recommendations.append(
+            "Rebalance toward race specificity by adding at least one swim-focused session."
+        )
+
+    if consistency_pct is not None and consistency_pct < 60:
+        recommendations.append(
+            "Protect consistency with shorter sessions on busy days to keep momentum."
+        )
+
+    insights = list(analysis.get("insights", []))
+    if insights:
+        top = sorted(
+            insights,
+            key=lambda item: _insight_severity(str(item.get("level", ""))),
+            reverse=True,
+        )[0]
+        top_title = str(top.get("title") or "").strip()
+        top_detail = str(top.get("detail") or "").strip()
+        if top_title and top_detail:
+            recommendations.append(f"{top_title}: {top_detail}")
+
+    deduped_recommendations: list[str] = []
+    for rec in recommendations:
+        if rec not in deduped_recommendations:
+            deduped_recommendations.append(rec)
+
+    if not deduped_recommendations:
+        deduped_recommendations = [
+            "Stay consistent with the current structure and keep easy days truly easy."
+        ]
+
+    return {
+        "as_of": as_of.isoformat(),
+        "status_level": level,
+        "status": status_title_by_level.get(level, "Monitor"),
+        "summary": summary_line,
+        "recommendations": deduped_recommendations[:3],
+    }
+
+
 async def coaching_analysis(
     session: AsyncSession,
     start: date,
