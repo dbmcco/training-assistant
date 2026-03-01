@@ -1,6 +1,12 @@
 import pytest
 
-from src.agent.tools import TOOL_DEFINITIONS, execute_tool
+from src.agent.tools import (
+    TOOL_DEFINITIONS,
+    _matches_discipline_filter,
+    _normalize_discipline_filter,
+    execute_tool,
+)
+from src.db.models import GarminActivity
 
 
 EXPECTED_TOOL_NAMES = [
@@ -39,6 +45,22 @@ def test_input_schemas_are_valid():
         assert "type" in schema
         assert schema["type"] == "object"
         assert "properties" in schema
+
+
+def test_normalize_discipline_filter_aliases():
+    assert _normalize_discipline_filter("running") == "run"
+    assert _normalize_discipline_filter("cycling") == "bike"
+    assert _normalize_discipline_filter("swimming") == "swim"
+    assert _normalize_discipline_filter("all") == "all"
+
+
+def test_matches_discipline_filter_uses_activity_type_when_sport_type_missing():
+    run_activity = GarminActivity(activity_type="running", sport_type=None)
+    swim_activity = GarminActivity(activity_type="pool_swim", sport_type=None)
+
+    assert _matches_discipline_filter("running", run_activity) is True
+    assert _matches_discipline_filter("swim", swim_activity) is True
+    assert _matches_discipline_filter("cycling", run_activity) is False
 
 
 @pytest.mark.asyncio

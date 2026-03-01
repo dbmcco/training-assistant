@@ -309,29 +309,94 @@ async def execute_tool(name: str, args: dict, db: AsyncSession) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _normalize_discipline_filter(value: str | None) -> str:
+    raw = (value or "all").strip().lower()
+    aliases = {
+        "all": "all",
+        "running": "run",
+        "run": "run",
+        "trail_running": "run",
+        "cycling": "bike",
+        "cycle": "bike",
+        "bike": "bike",
+        "biking": "bike",
+        "peloton": "bike",
+        "spinning": "bike",
+        "spin": "bike",
+        "swim": "swim",
+        "swimming": "swim",
+        "pool_swim": "swim",
+        "open_water_swim": "swim",
+        "strength": "strength",
+        "strength_training": "strength",
+        "walk": "walk",
+        "walking": "walk",
+        "hike": "walk",
+        "hiking": "walk",
+    }
+    return aliases.get(raw, raw)
+
+
+def _classify_activity_discipline(activity: GarminActivity) -> str:
+    text = f"{activity.sport_type or ''} {activity.activity_type or ''}".lower()
+    if "run" in text or "trail" in text:
+        return "run"
+    if "bike" in text or "cycl" in text or "peloton" in text or "spin" in text:
+        return "bike"
+    if "swim" in text or "pool" in text or "open_water" in text:
+        return "swim"
+    if "strength" in text or "lift" in text:
+        return "strength"
+    if "walk" in text or "hike" in text:
+        return "walk"
+    return "other"
+
+
+def _matches_discipline_filter(discipline: str, activity: GarminActivity) -> bool:
+    normalized_filter = _normalize_discipline_filter(discipline)
+    if normalized_filter == "all":
+        return True
+    classified = _classify_activity_discipline(activity)
+    if classified == normalized_filter:
+        return True
+    raw_text = f"{activity.sport_type or ''} {activity.activity_type or ''}".lower()
+    return normalized_filter in raw_text
+
+
 async def _query_activities(
     db: AsyncSession,
     discipline: str = "all",
     days_back: int = 7,
     limit: int = 10,
 ) -> str:
+    clamped_days_back = max(1, min(days_back, 60))
+    clamped_limit = max(1, min(limit, 50))
+
     q = (
         select(GarminActivity)
         .where(
             GarminActivity.start_time
-            >= datetime.now(timezone.utc) - timedelta(days=days_back)
+            >= datetime.now(timezone.utc) - timedelta(days=clamped_days_back)
         )
         .order_by(GarminActivity.start_time.desc())
-        .limit(limit)
     )
 
-    if discipline != "all":
-        q = q.where(GarminActivity.sport_type.ilike(f"%{discipline}%"))
-
     result = await db.execute(q)
-    activities = result.scalars().all()
+    recent_activities = list(result.scalars().all())
+    filtered_activities = [
+        activity
+        for activity in recent_activities
+        if _matches_discipline_filter(discipline, activity)
+    ]
+    activities = filtered_activities[:clamped_limit]
 
     if not activities:
+        normalized = _normalize_discipline_filter(discipline)
+        if normalized != "all" and recent_activities:
+            return (
+                f"No {normalized} activities found in the last {clamped_days_back} days. "
+                "I can still review your full recent activity list if you want."
+            )
         return "No activities found for the given criteria."
 
     lines = []

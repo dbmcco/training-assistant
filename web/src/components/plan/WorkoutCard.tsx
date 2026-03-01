@@ -36,6 +36,24 @@ interface WorkoutCardProps {
   onClick?: (workout: PlannedWorkout) => void
 }
 
+function normalizeDiscipline(value: string | null | undefined): string {
+  const raw = (value ?? '').trim().toLowerCase()
+  if (!raw) return 'other'
+  if (raw.startsWith('run') || raw.includes('trail')) return 'run'
+  if (raw.startsWith('swim') || raw.includes('pool') || raw.includes('open_water'))
+    return 'swim'
+  if (
+    raw.startsWith('bike') ||
+    raw.startsWith('cycl') ||
+    raw.includes('peloton') ||
+    raw.includes('spin')
+  ) {
+    return 'bike'
+  }
+  if (raw.startsWith('strength') || raw.includes('lift')) return 'strength'
+  return raw
+}
+
 function normalizePlannedDurationMinutes(rawDuration: number | null): number | null {
   if (rawDuration == null || rawDuration <= 0) return null
   // Garmin planned workouts arrive in seconds; user-entered edits may already be minutes.
@@ -43,9 +61,10 @@ function normalizePlannedDurationMinutes(rawDuration: number | null): number | n
 }
 
 export default function WorkoutCard({ workout, onClick }: WorkoutCardProps) {
-  const color = disciplineColors[workout.discipline] ?? 'text-gray-400'
-  const bgColor = disciplineBgColors[workout.discipline] ?? 'bg-gray-400/10'
-  const icon = disciplineIcons[workout.discipline] ?? '\u{1F3CB}'
+  const discipline = normalizeDiscipline(workout.discipline)
+  const color = disciplineColors[discipline] ?? 'text-gray-400'
+  const bgColor = disciplineBgColors[discipline] ?? 'bg-gray-400/10'
+  const icon = disciplineIcons[discipline] ?? '\u{1F3CB}'
   const statusStyle = statusStyles[workout.status] ?? statusStyles.upcoming
   const interactive = typeof onClick === 'function'
   const durationMinutes = normalizePlannedDurationMinutes(workout.target_duration)
