@@ -29,11 +29,15 @@ async def test_create_race():
         transport=ASGITransport(app=app), base_url="http://test"
     ) as client:
         resp = await client.post("/api/v1/races", json=payload)
-    assert resp.status_code == 201
-    data = resp.json()
-    assert data["name"] == "Test Sprint Tri"
-    assert data["distance_type"] == "sprint"
-    assert "id" in data
+        assert resp.status_code == 201
+        data = resp.json()
+        race_id = data["id"]
+        try:
+            assert data["name"] == "Test Sprint Tri"
+            assert data["distance_type"] == "sprint"
+            assert "id" in data
+        finally:
+            await client.delete(f"/api/v1/races/{race_id}")
 
 
 @pytest.mark.asyncio
@@ -50,14 +54,16 @@ async def test_create_and_update_race():
         create_resp = await client.post("/api/v1/races", json=payload)
         assert create_resp.status_code == 201
         race_id = create_resp.json()["id"]
-
-        update_resp = await client.put(
-            f"/api/v1/races/{race_id}",
-            json={"name": "Updated Race Name", "goal_time": 7200},
-        )
-    assert update_resp.status_code == 200
-    assert update_resp.json()["name"] == "Updated Race Name"
-    assert update_resp.json()["goal_time"] == 7200
+        try:
+            update_resp = await client.put(
+                f"/api/v1/races/{race_id}",
+                json={"name": "Updated Race Name", "goal_time": 7200},
+            )
+            assert update_resp.status_code == 200
+            assert update_resp.json()["name"] == "Updated Race Name"
+            assert update_resp.json()["goal_time"] == 7200
+        finally:
+            await client.delete(f"/api/v1/races/{race_id}")
 
 
 @pytest.mark.asyncio
@@ -94,12 +100,14 @@ async def test_race_projection():
         create_resp = await client.post("/api/v1/races", json=payload)
         assert create_resp.status_code == 201
         race_id = create_resp.json()["id"]
-
-        proj_resp = await client.get(f"/api/v1/races/{race_id}/projection")
-    assert proj_resp.status_code == 200
-    data = proj_resp.json()
-    assert "weeks_out" in data
-    assert data["name"] == "Projection Race"
+        try:
+            proj_resp = await client.get(f"/api/v1/races/{race_id}/projection")
+            assert proj_resp.status_code == 200
+            data = proj_resp.json()
+            assert "weeks_out" in data
+            assert data["name"] == "Projection Race"
+        finally:
+            await client.delete(f"/api/v1/races/{race_id}")
 
 
 @pytest.mark.asyncio
