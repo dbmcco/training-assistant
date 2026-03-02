@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from 'react'
+import { useState, useCallback, useMemo, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { fetchPlanActivities, fetchPlanWorkouts, fetchPlanAdherence } from '../api/client'
 import WeekCalendar from '../components/plan/WeekCalendar'
@@ -24,6 +24,12 @@ function formatDate(d: Date): string {
 
 export default function Plan() {
   const [weekStart, setWeekStart] = useState<Date>(() => getMonday(new Date()))
+  const currentWeekStartStr = useMemo(() => formatDate(getMonday(new Date())), [])
+  const todayStart = useMemo(() => {
+    const d = new Date()
+    d.setHours(0, 0, 0, 0)
+    return d
+  }, [])
 
   const weekEnd = useMemo(() => {
     const end = new Date(weekStart)
@@ -74,6 +80,35 @@ export default function Plan() {
   }, [workouts, activities, adherence])
 
   const hasQueryError = workoutsError || adherenceError || activitiesError
+
+  useEffect(() => {
+    if (workoutsLoading || workoutsError || !workouts) {
+      return
+    }
+
+    const viewingCurrentWeek = formatDate(weekStart) === currentWeekStartStr
+    if (!viewingCurrentWeek) {
+      return
+    }
+
+    const hasRemainingThisWeek = workouts.some((workout) => {
+      const status = (workout.status ?? '').toLowerCase()
+      const isRemainingStatus = status === '' || status === 'upcoming' || status === 'modified'
+      if (!isRemainingStatus) {
+        return false
+      }
+      const workoutDate = new Date(`${workout.date}T00:00:00`)
+      return workoutDate >= todayStart
+    })
+
+    if (!hasRemainingThisWeek) {
+      setWeekStart((prev) => {
+        const next = new Date(prev)
+        next.setDate(next.getDate() + 7)
+        return next
+      })
+    }
+  }, [workoutsLoading, workoutsError, workouts, weekStart, currentWeekStartStr, todayStart])
 
   const onPrevWeek = useCallback(() => {
     setWeekStart((prev) => {
