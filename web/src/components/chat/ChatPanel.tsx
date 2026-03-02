@@ -27,7 +27,7 @@ interface ChatPanelProps {
 
 const CONVERSATION_STORAGE_KEY = 'training-assistant-conversation-id'
 const DEFAULT_VISIBLE_MESSAGES = 12
-const CONVERSATION_FETCH_LIMIT = 120
+const CONVERSATION_FETCH_LIMIT = 40
 
 function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
@@ -114,6 +114,9 @@ export default function ChatPanel({ isOpen, onToggle }: ChatPanelProps) {
   const [conversationId, setConversationId] = useState<string | undefined>()
   const [decisionBusyId, setDecisionBusyId] = useState<string | null>(null)
   const [showFullHistory, setShowFullHistory] = useState(false)
+  const [historyHasMore, setHistoryHasMore] = useState(false)
+  const [historyCursor, setHistoryCursor] = useState<string | null>(null)
+  const [isLoadingOlderHistory, setIsLoadingOlderHistory] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const hasSeededBriefingRef = useRef(false)
   const hasHydratedConversationRef = useRef(false)
@@ -174,6 +177,8 @@ export default function ChatPanel({ isOpen, onToggle }: ChatPanelProps) {
         const hydrated = (conversation.messages ?? []).map(apiMessageToUi)
         setMessages(hydrated)
         setConversationId(conversation.id)
+        setHistoryHasMore(Boolean(conversation.history?.has_more))
+        setHistoryCursor(conversation.history?.next_before ?? null)
         hasSeededBriefingRef.current = hydrated.some((m) => m.id.startsWith('briefing-'))
       }
       hasHydratedConversationRef.current = true
@@ -211,6 +216,34 @@ export default function ChatPanel({ isOpen, onToggle }: ChatPanelProps) {
     ? messages
     : messages.slice(-DEFAULT_VISIBLE_MESSAGES)
   const hiddenCount = Math.max(0, messages.length - DEFAULT_VISIBLE_MESSAGES)
+
+  async function handleLoadOlderHistory() {
+    if (!conversationId || !historyHasMore || isLoadingOlderHistory) {
+      return
+    }
+
+    setIsLoadingOlderHistory(true)
+    try {
+      const older = await fetchConversation(conversationId, {
+        limit: CONVERSATION_FETCH_LIMIT,
+        before: historyCursor ?? undefined,
+      })
+      const olderMessages = (older.messages ?? []).map(apiMessageToUi)
+      setMessages((prev) => {
+        const existingIds = new Set(prev.map((msg) => msg.id))
+        const additions = olderMessages.filter((msg) => !existingIds.has(msg.id))
+        if (additions.length === 0) {
+          return prev
+        }
+        return [...additions, ...prev]
+      })
+      setHistoryHasMore(Boolean(older.history?.has_more))
+      setHistoryCursor(older.history?.next_before ?? null)
+      setShowFullHistory(true)
+    } finally {
+      setIsLoadingOlderHistory(false)
+    }
+  }
 
   useEffect(() => {
     const pending = pendingRecommendationsQuery.data
@@ -434,6 +467,8 @@ export default function ChatPanel({ isOpen, onToggle }: ChatPanelProps) {
     }
     setConversationId(undefined)
     setShowFullHistory(false)
+    setHistoryHasMore(false)
+    setHistoryCursor(null)
     if (latestBriefing) {
       setMessages([briefingToMessage(latestBriefing)])
       hasSeededBriefingRef.current = true
@@ -502,13 +537,24 @@ export default function ChatPanel({ isOpen, onToggle }: ChatPanelProps) {
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto p-4">
-        {messages.length > DEFAULT_VISIBLE_MESSAGES && (
+        {(messages.length > DEFAULT_VISIBLE_MESSAGES || historyHasMore) && (
           <div className="mb-3 rounded-lg border border-gray-700/80 bg-gray-900/70 px-3 py-2 text-xs text-gray-300">
             <span className="text-gray-400">
               {showFullHistory
                 ? `Showing full history (${messages.length} messages).`
                 : `Showing latest ${visibleMessages.length} messages.`}
             </span>{' '}
+            {historyHasMore && (
+              <button
+                type="button"
+                onClick={handleLoadOlderHistory}
+                disabled={isLoadingOlderHistory}
+                className="mr-2 text-blue-300 hover:text-blue-200 disabled:opacity-60"
+              >
+                {isLoadingOlderHistory ? 'Loading older...' : 'Load older'}
+              </button>
+            )}
+            {messages.length > DEFAULT_VISIBLE_MESSAGES && (
             <button
               type="button"
               onClick={() => setShowFullHistory((v) => !v)}
@@ -518,6 +564,7 @@ export default function ChatPanel({ isOpen, onToggle }: ChatPanelProps) {
                 ? `Hide older ${hiddenCount} messages`
                 : `Show full history (${messages.length})`}
             </button>
+            )}
           </div>
         )}
         {messages.length === 0 && (

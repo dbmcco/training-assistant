@@ -275,8 +275,15 @@ export interface ChatMessage {
   created_at: string
 }
 
+export interface ConversationHistoryMeta {
+  limit: number
+  has_more: boolean
+  next_before: string | null
+}
+
 export interface ConversationDetail extends Conversation {
   messages: ChatMessage[]
+  history?: ConversationHistoryMeta
 }
 
 export interface ChatEvent {

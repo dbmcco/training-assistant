@@ -46,6 +46,8 @@ Model/runtime:
 - Tool-use loop with live token streaming (SSE)
 - Uses DB-backed tools for activities, readiness, load, races, plan adherence,
   biometrics, and active alerts
+- Uses long-term PG vector memory for retrieval, while the chat panel loads
+  recent history in pages (so the UI stays usable without losing memory depth)
 
 Coaching methodology:
 

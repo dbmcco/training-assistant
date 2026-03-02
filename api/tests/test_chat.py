@@ -192,6 +192,72 @@ async def test_get_conversation_not_found():
     assert resp.status_code == 404
 
 
+@pytest.mark.asyncio
+async def test_get_conversation_paginates_history():
+    """GET /api/v1/conversations/{id} should support cursor pagination metadata."""
+    events = [_make_text_delta_event("ok")]
+    final_msg = _make_final_message(stop_reason="end_turn", content_text="ok")
+    mock_stream = MockAsyncStream(events, final_msg)
+    mock_client = MagicMock()
+    mock_client.messages = MagicMock()
+    mock_client.messages.stream = MagicMock(return_value=mock_stream)
+
+    with patch("src.agent.coach.client", mock_client):
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            first_chat = await client.post(
+                "/api/v1/chat",
+                json={"message": "history message 1"},
+            )
+            assert first_chat.status_code == 200
+
+            await client.post(
+                "/api/v1/chat",
+                json={
+                    "message": "history message 2",
+                },
+            )
+            await client.post(
+                "/api/v1/chat",
+                json={
+                    "message": "history message 3",
+                },
+            )
+            conversations_resp = await client.get("/api/v1/conversations")
+            assert conversations_resp.status_code == 200
+            conv_id = conversations_resp.json()[0]["id"]
+            first_page = await client.get(
+                f"/api/v1/conversations/{conv_id}",
+                params={"limit": 2},
+            )
+
+    assert first_page.status_code == 200
+    first_data = first_page.json()
+    assert len(first_data["messages"]) == 2
+    assert first_data["history"]["has_more"] is True
+    assert first_data["history"]["next_before"] is not None
+
+    with patch("src.agent.coach.client", mock_client):
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            second_page = await client.get(
+                f"/api/v1/conversations/{conv_id}",
+                params={
+                    "limit": 2,
+                    "before": first_data["history"]["next_before"],
+                },
+            )
+
+    assert second_page.status_code == 200
+    second_data = second_page.json()
+    assert len(second_data["messages"]) >= 1
+    first_ids = {msg["id"] for msg in first_data["messages"]}
+    second_ids = {msg["id"] for msg in second_data["messages"]}
+    assert first_ids.isdisjoint(second_ids)
+
+
 # ---------------------------------------------------------------------------
 # DELETE /api/v1/conversations/{id} — delete
 # ---------------------------------------------------------------------------

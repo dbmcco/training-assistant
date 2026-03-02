@@ -73,7 +73,11 @@ async def list_conversations(db: AsyncSession = Depends(get_db)):
 @router.get("/conversations/{conversation_id}")
 async def get_conversation(
     conversation_id: UUID,
-    limit: int = Query(default=120, ge=20, le=500),
+    limit: int = Query(default=40, ge=1, le=200),
+    before: datetime | None = Query(
+        default=None,
+        description="Only return messages created before this timestamp (ISO datetime).",
+    ),
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(
@@ -83,17 +87,34 @@ async def get_conversation(
     if not conv:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
-    msg_result = await db.execute(
+    message_query = (
         select(Message)
         .where(Message.conversation_id == conversation_id)
         .order_by(Message.created_at.desc())
-        .limit(limit)
     )
-    messages = list(msg_result.scalars().all())
-    messages.reverse()
+    if before is not None:
+        message_query = message_query.where(Message.created_at < before)
+
+    msg_result = await db.execute(message_query.limit(limit + 1))
+    messages_desc = list(msg_result.scalars().all())
+    has_more = len(messages_desc) > limit
+    if has_more:
+        messages_desc = messages_desc[:limit]
+    messages_desc.reverse()
+
+    next_before: str | None = None
+    if has_more and messages_desc:
+        oldest_created = messages_desc[0].created_at
+        if oldest_created is not None:
+            next_before = oldest_created.isoformat()
 
     data = _conversation_to_dict(conv)
-    data["messages"] = [_message_to_dict(m) for m in messages]
+    data["messages"] = [_message_to_dict(m) for m in messages_desc]
+    data["history"] = {
+        "limit": limit,
+        "has_more": has_more,
+        "next_before": next_before,
+    }
     return data
 
 

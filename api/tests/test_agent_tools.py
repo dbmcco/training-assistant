@@ -19,6 +19,10 @@ EXPECTED_TOOL_NAMES = [
     "get_training_load",
     "modify_workout",
     "update_athlete_profile",
+    "get_discipline_distribution",
+    "get_fitness_trends",
+    "get_biometrics",
+    "get_active_alerts",
 ]
 
 
@@ -30,13 +34,12 @@ def test_all_tools_have_required_fields():
 
 
 def test_tool_count():
-    assert len(TOOL_DEFINITIONS) == 9
+    assert len(TOOL_DEFINITIONS) == len(EXPECTED_TOOL_NAMES)
 
 
 def test_tool_names():
     names = [t["name"] for t in TOOL_DEFINITIONS]
-    for name in EXPECTED_TOOL_NAMES:
-        assert name in names
+    assert set(names) == set(EXPECTED_TOOL_NAMES)
 
 
 def test_input_schemas_are_valid():
@@ -163,6 +166,25 @@ async def test_execute_update_athlete_profile():
         )
     assert isinstance(result, str)
     assert "saved" in result.lower() or "updated" in result.lower()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("tool_name", "args"),
+    [
+        ("get_discipline_distribution", {"days_back": 28}),
+        ("get_fitness_trends", {"days_back": 30}),
+        ("get_biometrics", {}),
+        ("get_active_alerts", {"limit": 5}),
+    ],
+)
+async def test_execute_extended_tools(tool_name: str, args: dict):
+    from src.db.connection import async_session
+
+    async with async_session() as session:
+        result = await execute_tool(tool_name, args, session)
+    assert isinstance(result, str)
+    assert result.strip() != ""
 
 
 @pytest.mark.asyncio
