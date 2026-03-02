@@ -155,6 +155,20 @@ export interface ExecutiveSummary {
   recommendations: string[]
 }
 
+export interface PlanWeekSummary {
+  start: string
+  end: string
+  total_planned: number
+  due_so_far: number
+  on_plan_completed: number
+  remaining: number
+  next_sessions: Array<{
+    date: string
+    label: string
+    status: string
+  }>
+}
+
 export interface CoachInsight {
   level: 'good' | 'watch' | 'warning'
   title: string
@@ -234,6 +248,7 @@ export interface DashboardTrends {
   events: TrendEvent[]
   coach_summary: TrendCoachSummary | null
   executive_summary: ExecutiveSummary | null
+  plan_week: PlanWeekSummary | null
 }
 
 export interface Race {

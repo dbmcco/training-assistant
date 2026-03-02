@@ -3,11 +3,11 @@
 from datetime import date, timedelta
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import select
+from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db.connection import get_db
-from src.db.models import DailyBriefing, GarminDailySummary, Race
+from src.db.models import DailyBriefing, GarminDailySummary, PlannedWorkout, Race
 from src.services.analytics import (
     activity_stats,
     activity_type_breakdown,
@@ -32,6 +32,7 @@ from src.services.recommendations import (
     get_briefing_recommendation,
     serialize_recommendation,
 )
+from src.services.workout_duration import format_planned_duration
 
 router = APIRouter(prefix="/api/v1/dashboard", tags=["dashboard"])
 
@@ -235,6 +236,42 @@ async def dashboard_trends(
     executive_analysis = await coaching_analysis(
         db, executive_start, executive_end, executive_volume, executive_stats
     )
+
+    week_start = executive_end - timedelta(days=executive_end.weekday())
+    week_end = week_start + timedelta(days=6)
+    week_plan_result = await db.execute(
+        select(PlannedWorkout)
+        .where(
+            and_(
+                PlannedWorkout.date >= week_start,
+                PlannedWorkout.date <= week_end,
+            )
+        )
+        .order_by(PlannedWorkout.date.asc())
+    )
+    week_workouts = list(week_plan_result.scalars().all())
+    week_adherence = await get_plan_adherence(db, week_start, week_end)
+    next_sessions = [
+        {
+            "date": workout.date.isoformat(),
+            "label": (
+                f"{workout.discipline} {workout.workout_type or workout.description or 'session'}"
+                f" {format_planned_duration(workout.target_duration)}"
+            ).strip(),
+            "status": workout.status,
+        }
+        for workout in week_workouts
+        if workout.date >= executive_end
+    ][:3]
+    plan_week = {
+        "start": week_start.isoformat(),
+        "end": week_end.isoformat(),
+        "total_planned": len(week_workouts),
+        "due_so_far": int(week_adherence.get("due_planned", 0)),
+        "on_plan_completed": int(week_adherence.get("completed", 0)),
+        "remaining": max(0, len(week_workouts) - int(week_adherence.get("completed", 0))),
+        "next_sessions": next_sessions,
+    }
     latest_summary_result = await db.execute(
         select(GarminDailySummary)
         .order_by(GarminDailySummary.calendar_date.desc())
@@ -242,7 +279,7 @@ async def dashboard_trends(
     )
     latest_summary = latest_summary_result.scalar_one_or_none()
     executive_summary = build_daily_executive_summary(
-        executive_end, latest_summary, executive_analysis
+        executive_end, latest_summary, executive_analysis, plan_week=plan_week
     )
 
     return {
@@ -266,4 +303,5 @@ async def dashboard_trends(
         "events": events,
         "coach_summary": coach_summary,
         "executive_summary": executive_summary,
+        "plan_week": plan_week,
     }

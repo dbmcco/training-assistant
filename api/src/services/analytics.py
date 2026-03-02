@@ -597,6 +597,7 @@ def build_daily_executive_summary(
     as_of: date,
     latest_summary: GarminDailySummary | None,
     analysis: dict[str, Any],
+    plan_week: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Create a daily executive status and recommendations block."""
     readiness_score = (
@@ -654,6 +655,11 @@ def build_daily_executive_summary(
     consistency_pct = analysis.get("consistency", {}).get("consistency_pct")
     if consistency_pct is not None:
         summary_parts.append(f"Consistency {consistency_pct}%")
+    if plan_week and plan_week.get("total_planned", 0) > 0:
+        summary_parts.append(
+            "Plan "
+            f"{plan_week.get('on_plan_completed', 0)}/{plan_week.get('total_planned', 0)} on plan"
+        )
 
     summary_line = (
         " | ".join(summary_parts)
@@ -709,12 +715,32 @@ def build_daily_executive_summary(
             "Stay consistent with the current structure and keep easy days truly easy."
         ]
 
+    if plan_week:
+        remaining = int(plan_week.get("remaining", 0) or 0)
+        next_sessions = list(plan_week.get("next_sessions", []))
+        if remaining > 0:
+            deduped_recommendations.insert(
+                0, f"Execute your remaining {remaining} planned session(s) this week."
+            )
+        if next_sessions:
+            next_session = next_sessions[0]
+            next_date = next_session.get("date", "upcoming")
+            next_label = next_session.get("label", "planned session")
+            deduped_recommendations.insert(
+                1, f"Next key session: {next_date} {next_label}."
+            )
+
+    ordered_recommendations: list[str] = []
+    for rec in deduped_recommendations:
+        if rec not in ordered_recommendations:
+            ordered_recommendations.append(rec)
+
     return {
         "as_of": as_of.isoformat(),
         "status_level": level,
         "status": status_title_by_level.get(level, "Monitor"),
         "summary": summary_line,
-        "recommendations": deduped_recommendations[:3],
+        "recommendations": ordered_recommendations[:3],
     }
 
 

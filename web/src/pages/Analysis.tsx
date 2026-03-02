@@ -23,6 +23,7 @@ export default function Analysis() {
   })
 
   const executive = trends.data?.executive_summary
+  const planWeek = trends.data?.plan_week
   const executiveStatusClasses =
     executive?.status_level === 'warning'
       ? 'border-red-500/40 bg-red-500/10 text-red-200'
@@ -52,6 +53,26 @@ export default function Analysis() {
         <p className="text-sm text-gray-200">
           {executive?.summary ?? 'Building today’s executive view from your most recent trend data.'}
         </p>
+
+        {planWeek && (
+          <div className="rounded-lg border border-gray-800 bg-gray-950 px-3 py-2 text-xs text-gray-300">
+            <div className="font-medium text-gray-200">
+              Weekly Plan ({planWeek.start} to {planWeek.end})
+            </div>
+            <div className="mt-1 text-gray-400">
+              {planWeek.on_plan_completed}/{planWeek.total_planned} on plan • {planWeek.remaining} remaining
+            </div>
+            {planWeek.next_sessions.length > 0 && (
+              <ul className="mt-2 space-y-1 list-disc list-inside text-gray-300">
+                {planWeek.next_sessions.map((session, idx) => (
+                  <li key={`${session.date}-${idx}`}>
+                    {session.date}: {session.label}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
 
         {executive?.recommendations && executive.recommendations.length > 0 && (
           <ul className="space-y-1 text-xs text-gray-300 list-disc list-inside">
