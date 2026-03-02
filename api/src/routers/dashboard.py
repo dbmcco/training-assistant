@@ -83,6 +83,51 @@ async def _select_latest_dashboard_summary(
     return latest_summary, summary_for_metrics
 
 
+async def _build_metric_snapshot(
+    db: AsyncSession,
+    preferred_summary: GarminDailySummary | None,
+) -> tuple[dict[str, int | None], dict[str, str | None]]:
+    history_result = await db.execute(
+        select(GarminDailySummary)
+        .order_by(GarminDailySummary.calendar_date.desc())
+        .limit(14)
+    )
+    history = list(history_result.scalars().all())
+
+    preferred_date = preferred_summary.calendar_date if preferred_summary else None
+
+    def _pick(metric_name: str) -> tuple[int | None, str | None]:
+        if preferred_summary is not None:
+            preferred_value = getattr(preferred_summary, metric_name)
+            if preferred_value is not None:
+                return int(preferred_value), preferred_date.isoformat() if preferred_date else None
+
+        for row in history:
+            value = getattr(row, metric_name)
+            if value is not None:
+                return int(value), row.calendar_date.isoformat() if row.calendar_date else None
+        return None, None
+
+    sleep_score, sleep_as_of = _pick("sleep_score")
+    body_battery, body_battery_as_of = _pick("body_battery_at_wake")
+    hrv_last_night, hrv_as_of = _pick("hrv_last_night")
+    resting_hr, resting_hr_as_of = _pick("resting_heart_rate")
+
+    metrics = {
+        "sleep_score": sleep_score,
+        "body_battery_wake": body_battery,
+        "hrv_last_night": hrv_last_night,
+        "resting_hr": resting_hr,
+    }
+    metrics_as_of = {
+        "sleep_score": sleep_as_of,
+        "body_battery_wake": body_battery_as_of,
+        "hrv_last_night": hrv_as_of,
+        "resting_hr": resting_hr_as_of,
+    }
+    return metrics, metrics_as_of
+
+
 @router.post("/refresh")
 async def dashboard_refresh(
     include_calendar: bool = Query(
@@ -107,6 +152,7 @@ async def dashboard_today(db: AsyncSession = Depends(get_db)):
     today = date.today()
 
     latest_summary, summary = await _select_latest_dashboard_summary(db)
+    metrics, metrics_as_of = await _build_metric_snapshot(db, summary)
 
     # Compute readiness from the latest summary with usable recovery metrics.
     if summary:
@@ -137,12 +183,6 @@ async def dashboard_today(db: AsyncSession = Depends(get_db)):
                 for c in readiness.components
             ],
         }
-        metrics = {
-            "sleep_score": summary.sleep_score,
-            "body_battery_wake": summary.body_battery_at_wake,
-            "hrv_last_night": summary.hrv_last_night,
-            "resting_hr": summary.resting_heart_rate,
-        }
         training_status = (
             latest_summary.training_status
             if latest_summary and latest_summary.training_status is not None
@@ -150,12 +190,6 @@ async def dashboard_today(db: AsyncSession = Depends(get_db)):
         )
     else:
         readiness_data = {"score": 50, "label": "Moderate", "components": []}
-        metrics = {
-            "sleep_score": None,
-            "body_battery_wake": None,
-            "hrv_last_night": None,
-            "resting_hr": None,
-        }
         training_status = None
 
     # Today's planned workout
@@ -203,6 +237,7 @@ async def dashboard_today(db: AsyncSession = Depends(get_db)):
         "briefing": briefing,
         "training_status": training_status,
         "metrics": metrics,
+        "metrics_as_of": metrics_as_of,
     }
 
 
