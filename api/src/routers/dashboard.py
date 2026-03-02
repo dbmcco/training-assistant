@@ -237,19 +237,34 @@ async def dashboard_trends(
         db, executive_start, executive_end, executive_volume, executive_stats
     )
 
-    week_start = executive_end - timedelta(days=executive_end.weekday())
-    week_end = week_start + timedelta(days=6)
-    week_plan_result = await db.execute(
-        select(PlannedWorkout)
-        .where(
-            and_(
-                PlannedWorkout.date >= week_start,
-                PlannedWorkout.date <= week_end,
+    async def _load_plan_window(window_start: date, window_end: date) -> list[PlannedWorkout]:
+        window_result = await db.execute(
+            select(PlannedWorkout)
+            .where(
+                and_(
+                    PlannedWorkout.date >= window_start,
+                    PlannedWorkout.date <= window_end,
+                )
             )
+            .order_by(PlannedWorkout.date.asc())
         )
-        .order_by(PlannedWorkout.date.asc())
-    )
-    week_workouts = list(week_plan_result.scalars().all())
+        return list(window_result.scalars().all())
+
+    today_anchor = requested_end or date.today()
+    week_start = today_anchor - timedelta(days=today_anchor.weekday())
+    week_end = week_start + timedelta(days=6)
+    week_workouts = await _load_plan_window(week_start, week_end)
+    future_workouts = [workout for workout in week_workouts if workout.date >= today_anchor]
+    if not future_workouts:
+        next_week_start = week_start + timedelta(days=7)
+        next_week_end = next_week_start + timedelta(days=6)
+        next_week_workouts = await _load_plan_window(next_week_start, next_week_end)
+        if next_week_workouts:
+            week_start = next_week_start
+            week_end = next_week_end
+            week_workouts = next_week_workouts
+            future_workouts = list(next_week_workouts)
+
     week_adherence = await get_plan_adherence(db, week_start, week_end)
     next_sessions = [
         {
@@ -260,8 +275,7 @@ async def dashboard_trends(
             ).strip(),
             "status": workout.status,
         }
-        for workout in week_workouts
-        if workout.date >= executive_end
+        for workout in future_workouts
     ][:3]
     plan_week = {
         "start": week_start.isoformat(),
