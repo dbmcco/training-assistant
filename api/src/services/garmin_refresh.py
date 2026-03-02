@@ -68,7 +68,19 @@ def _store_last_success_epoch(epoch: float) -> None:
     STATE_FILE.write_text(json.dumps(payload))
 
 
+def _lock_age_seconds() -> float | None:
+    try:
+        return max(0.0, time.time() - LOCK_DIR.stat().st_mtime)
+    except OSError:
+        return None
+
+
 def _lock_is_stale() -> bool:
+    lock_age = _lock_age_seconds()
+    stale_after = max(settings.garmin_refresh_timeout_seconds, 5) + 15
+    if lock_age is not None and lock_age > stale_after:
+        return True
+
     if not PID_FILE.exists():
         return True
     try:
@@ -174,12 +186,18 @@ def _refresh_dashboard_data(*, include_calendar: bool = False, force: bool = Fal
         }
 
     if not _acquire_lock():
-        return {"status": "skipped", "reason": "refresh_already_running"}
+        lock_age = _lock_age_seconds()
+        return {
+            "status": "skipped",
+            "reason": "refresh_already_running",
+            "lock_age_seconds": round(lock_age, 1) if lock_age is not None else None,
+        }
 
     timeout_seconds = max(settings.garmin_refresh_timeout_seconds, 5)
+    days_back = max(settings.garmin_refresh_days_back, 0)
     try:
         commands: list[list[str]] = [
-            [str(python_bin), str(sync_script), "--daily-only", "--days-back", "0"],
+            [str(python_bin), str(sync_script), "--daily-only", "--days-back", str(days_back)],
         ]
         if include_calendar:
             commands.append([str(python_bin), str(sync_script), "--calendar-only"])
@@ -199,6 +217,7 @@ def _refresh_dashboard_data(*, include_calendar: bool = False, force: bool = Fal
         return {
             "status": "success",
             "include_calendar": include_calendar,
+            "days_back": days_back,
             "results": results,
         }
     finally:

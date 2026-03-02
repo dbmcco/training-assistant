@@ -184,6 +184,7 @@ The web app proxies `/api` requests to `http://127.0.0.1:8000`.
 - Dashboard refresh endpoint: `POST /api/v1/dashboard/refresh`
 - On-demand refresh pulls latest daily metrics via `garmin-connect-sync`
 - Refresh cadence is controlled by `GARMIN_REFRESH_MIN_INTERVAL_SECONDS`
+- Refresh backfill window is controlled by `GARMIN_REFRESH_DAYS_BACK` (default `1`)
 - This refresh endpoint is Garmin-focused; Peloton import runs via `garmin-connect-sync/run_sync.sh`
 
 ## Privacy and Secrets

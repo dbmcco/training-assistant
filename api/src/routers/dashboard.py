@@ -3,7 +3,7 @@
 from datetime import date, timedelta
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import select, and_
+from sqlalchemy import select, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db.connection import get_db
@@ -37,6 +37,52 @@ from src.services.workout_duration import format_planned_duration
 router = APIRouter(prefix="/api/v1/dashboard", tags=["dashboard"])
 
 
+def _has_recovery_metrics(summary: GarminDailySummary | None) -> bool:
+    if summary is None:
+        return False
+    return any(
+        value is not None
+        for value in (
+            summary.sleep_score,
+            summary.body_battery_at_wake,
+            summary.hrv_last_night,
+            summary.resting_heart_rate,
+            summary.training_readiness_score,
+        )
+    )
+
+
+async def _select_latest_dashboard_summary(
+    db: AsyncSession,
+) -> tuple[GarminDailySummary | None, GarminDailySummary | None]:
+    latest_result = await db.execute(
+        select(GarminDailySummary)
+        .order_by(GarminDailySummary.calendar_date.desc())
+        .limit(1)
+    )
+    latest_summary = latest_result.scalar_one_or_none()
+
+    if _has_recovery_metrics(latest_summary):
+        return latest_summary, latest_summary
+
+    fallback_result = await db.execute(
+        select(GarminDailySummary)
+        .where(
+            or_(
+                GarminDailySummary.sleep_score.is_not(None),
+                GarminDailySummary.body_battery_at_wake.is_not(None),
+                GarminDailySummary.hrv_last_night.is_not(None),
+                GarminDailySummary.resting_heart_rate.is_not(None),
+                GarminDailySummary.training_readiness_score.is_not(None),
+            )
+        )
+        .order_by(GarminDailySummary.calendar_date.desc())
+        .limit(1)
+    )
+    summary_for_metrics = fallback_result.scalar_one_or_none() or latest_summary
+    return latest_summary, summary_for_metrics
+
+
 @router.post("/refresh")
 async def dashboard_refresh(
     include_calendar: bool = Query(
@@ -60,15 +106,9 @@ async def dashboard_today(db: AsyncSession = Depends(get_db)):
     """Return today's dashboard snapshot: readiness, workout, races, briefing, metrics."""
     today = date.today()
 
-    # Get the latest GarminDailySummary (may not be exactly today)
-    summary_result = await db.execute(
-        select(GarminDailySummary)
-        .order_by(GarminDailySummary.calendar_date.desc())
-        .limit(1)
-    )
-    summary = summary_result.scalar_one_or_none()
+    latest_summary, summary = await _select_latest_dashboard_summary(db)
 
-    # Compute readiness from the latest summary
+    # Compute readiness from the latest summary with usable recovery metrics.
     if summary:
         recovery_time_hours = normalize_recovery_time_hours(
             summary.recovery_time_hours,
@@ -103,7 +143,11 @@ async def dashboard_today(db: AsyncSession = Depends(get_db)):
             "hrv_last_night": summary.hrv_last_night,
             "resting_hr": summary.resting_heart_rate,
         }
-        training_status = summary.training_status
+        training_status = (
+            latest_summary.training_status
+            if latest_summary and latest_summary.training_status is not None
+            else summary.training_status
+        )
     else:
         readiness_data = {"score": 50, "label": "Moderate", "components": []}
         metrics = {

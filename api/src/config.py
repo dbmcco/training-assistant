@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     garmin_refresh_python: str = ""
     garmin_refresh_timeout_seconds: int = 90
     garmin_refresh_min_interval_seconds: int = 120
+    garmin_refresh_days_back: int = 1
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
