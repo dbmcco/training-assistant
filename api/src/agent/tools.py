@@ -23,6 +23,7 @@ from src.services.units import (
     format_distance_from_meters,
     format_pace_per_mile,
 )
+from src.services.garmin_refresh import refresh_garmin_daily_data_on_demand
 from src.services.recovery_time import normalize_recovery_time_hours
 from src.services.workout_duration import format_planned_duration
 
@@ -265,6 +266,29 @@ TOOL_DEFINITIONS: list[dict] = [
             "required": [],
         },
     },
+    {
+        "name": "refresh_garmin_data",
+        "description": (
+            "Run an on-demand Garmin refresh so plan/calendar and daily recovery metrics "
+            "are re-synced before answering freshness or mismatch questions."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "include_calendar": {
+                    "type": "boolean",
+                    "description": "Also refresh Garmin calendar/planned workouts.",
+                    "default": True,
+                },
+                "force": {
+                    "type": "boolean",
+                    "description": "Bypass short cooldown and trigger refresh now.",
+                    "default": True,
+                },
+            },
+            "required": [],
+        },
+    },
 ]
 
 
@@ -293,6 +317,7 @@ async def execute_tool(name: str, args: dict, db: AsyncSession) -> str:
         "get_fitness_trends": _get_fitness_trends,
         "get_biometrics": _get_biometrics,
         "get_active_alerts": _get_active_alerts,
+        "refresh_garmin_data": _refresh_garmin_data,
     }
 
     handler = handlers.get(name)
@@ -827,4 +852,44 @@ async def _get_active_alerts(db: AsyncSession, limit: int = 10) -> str:
     for a in alerts:
         lines.append(f"  - [{a.severity}] {a.title}: {a.message or ''}")
 
+    return "\n".join(lines)
+
+
+async def _refresh_garmin_data(
+    db: AsyncSession, include_calendar: bool = True, force: bool = True
+) -> str:
+    # db is required by the shared tool signature but unused here.
+    _ = db
+    result = await refresh_garmin_daily_data_on_demand(
+        include_calendar=include_calendar,
+        force=force,
+    )
+
+    status = result.get("status")
+    if status == "success":
+        lines = [
+            "Garmin refresh: success",
+            f"  include_calendar: {bool(result.get('include_calendar', include_calendar))}",
+        ]
+        if "days_back" in result:
+            lines.append(f"  days_back: {result.get('days_back')}")
+        for idx, cmd_result in enumerate(result.get("results", [])[:3], start=1):
+            cmd = cmd_result.get("command", [])
+            cmd_text = " ".join(str(part) for part in cmd[-4:]) if cmd else "(unknown)"
+            lines.append(f"  command {idx}: {cmd_result.get('status', 'unknown')} [{cmd_text}]")
+            stdout_tail = (cmd_result.get("stdout") or "").strip()
+            if stdout_tail:
+                lines.append(f"    stdout: {stdout_tail.splitlines()[-1]}")
+        return "\n".join(lines)
+
+    reason = result.get("reason", "unknown")
+    lines = [f"Garmin refresh: {status or 'unknown'} ({reason})"]
+    if "lock_age_seconds" in result:
+        lines.append(f"  lock_age_seconds: {result.get('lock_age_seconds')}")
+    if "seconds_since_last_success" in result:
+        lines.append(
+            "  seconds_since_last_success: "
+            f"{result.get('seconds_since_last_success')} "
+            f"(min_interval={result.get('min_interval_seconds')})"
+        )
     return "\n".join(lines)

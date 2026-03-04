@@ -23,6 +23,7 @@ EXPECTED_TOOL_NAMES = [
     "get_fitness_trends",
     "get_biometrics",
     "get_active_alerts",
+    "refresh_garmin_data",
 ]
 
 
@@ -195,3 +196,33 @@ async def test_execute_unknown_tool():
         result = await execute_tool("nonexistent_tool", {}, session)
     assert isinstance(result, str)
     assert "unknown" in result.lower() or "error" in result.lower()
+
+
+@pytest.mark.asyncio
+async def test_execute_refresh_garmin_data(monkeypatch):
+    from src.db.connection import async_session
+
+    async def fake_refresh(*, include_calendar: bool = False, force: bool = False):
+        return {
+            "status": "success",
+            "include_calendar": include_calendar,
+            "days_back": 1,
+            "results": [
+                {
+                    "status": "success",
+                    "command": ["python3", "sync.py", "--daily-only", "--days-back", "1"],
+                    "stdout": "Saved daily summary for 2026-03-02.",
+                }
+            ],
+        }
+
+    monkeypatch.setattr("src.agent.tools.refresh_garmin_daily_data_on_demand", fake_refresh)
+
+    async with async_session() as session:
+        result = await execute_tool(
+            "refresh_garmin_data",
+            {"include_calendar": True, "force": True},
+            session,
+        )
+    assert "success" in result.lower()
+    assert "include_calendar: True" in result
