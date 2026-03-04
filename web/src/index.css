@@ -1,5 +1,25 @@
 @import "tailwindcss";
 
+:root {
+  color-scheme: dark;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  /* Remap core grays so existing dark-first utility classes render as daylight UI. */
+  --color-gray-950: #f4f7fb;
+  --color-gray-900: #ffffff;
+  --color-gray-800: #e2e8f0;
+  --color-gray-700: #cbd5e1;
+  --color-gray-600: #94a3b8;
+  --color-gray-500: #64748b;
+  --color-gray-400: #475569;
+  --color-gray-300: #334155;
+  --color-gray-200: #1e293b;
+  --color-gray-100: #0f172a;
+}
+
 .safe-area-pb {
   padding-bottom: env(safe-area-inset-bottom, 0px);
 }
