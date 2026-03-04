@@ -253,6 +253,24 @@ class PlanChangeEvent(Base):
     detected_at = Column(TIMESTAMP(timezone=True))
 
 
+class AssistantPlanEntry(Base):
+    __tablename__ = "assistant_plan_entries"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    planned_workout_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("planned_workouts.id"),
+        nullable=False,
+        unique=True,
+    )
+    is_locked = Column(Boolean, default=False, nullable=False)
+    garmin_workout_id = Column(Text, nullable=True)
+    garmin_sync_status = Column(Text, nullable=True, default="pending")
+    garmin_sync_result = Column(JSONB, nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True))
+    updated_at = Column(TIMESTAMP(timezone=True))
+
+
 class Conversation(Base):
     __tablename__ = "conversations"
 

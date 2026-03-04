@@ -5,7 +5,10 @@ from datetime import date, datetime, timedelta, timezone
 from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.config import settings
+from src.db.models import AssistantPlanEntry
 from src.db.models import GarminActivity, PlannedWorkout, TrainingPlan
+from src.services.assistant_plan import assistant_plan_table_available
 from src.services.workout_duration import (
     normalize_planned_duration_minutes,
     planned_duration_seconds,
@@ -80,6 +83,10 @@ def _coerce_created_at(value: datetime | None) -> datetime:
     if value.tzinfo is None:
         return value.replace(tzinfo=timezone.utc)
     return value.astimezone(timezone.utc)
+
+
+def _assistant_mode() -> bool:
+    return settings.plan_ownership_mode.strip().lower() == "assistant"
 
 
 def _dedupe_workouts(workouts: list[PlannedWorkout]) -> list[PlannedWorkout]:
@@ -194,11 +201,21 @@ def _reconcile_due_workouts(
 
 async def get_today_workout(session: AsyncSession) -> dict | None:
     """Get today's planned workout, if any."""
-    result = await session.execute(
+    query = (
         select(PlannedWorkout)
         .where(PlannedWorkout.date == date.today())
+        .order_by(PlannedWorkout.created_at.desc())
         .limit(1)
     )
+    if _assistant_mode():
+        if not await assistant_plan_table_available(session):
+            return None
+        query = query.join(
+            AssistantPlanEntry,
+            AssistantPlanEntry.planned_workout_id == PlannedWorkout.id,
+        )
+
+    result = await session.execute(query)
     workout = result.scalar_one_or_none()
     if not workout:
         return None
@@ -219,7 +236,7 @@ async def get_upcoming_workouts(
     count: int = 5,
 ) -> list[dict]:
     """Get next N planned workouts from today onwards."""
-    result = await session.execute(
+    query = (
         select(PlannedWorkout)
         .where(
             and_(
@@ -230,6 +247,15 @@ async def get_upcoming_workouts(
         .order_by(PlannedWorkout.date)
         .limit(count)
     )
+    if _assistant_mode():
+        if not await assistant_plan_table_available(session):
+            return []
+        query = query.join(
+            AssistantPlanEntry,
+            AssistantPlanEntry.planned_workout_id == PlannedWorkout.id,
+        )
+
+    result = await session.execute(query)
     workouts = result.scalars().all()
     return [
         {
@@ -256,14 +282,32 @@ async def get_plan_adherence(
     - it is explicitly marked completed, or
     - a same-day, same-discipline activity exists with enough duration.
     """
-    workouts_result = await session.execute(
-        select(PlannedWorkout).where(
-            and_(
-                PlannedWorkout.date >= start,
-                PlannedWorkout.date <= end,
-            )
+    query = select(PlannedWorkout).where(
+        and_(
+            PlannedWorkout.date >= start,
+            PlannedWorkout.date <= end,
         )
     )
+    if _assistant_mode():
+        if not await assistant_plan_table_available(session):
+            return {
+                "total_planned": 0,
+                "due_planned": 0,
+                "pending_future": 0,
+                "completed": 0,
+                "strict_completed": 0,
+                "aligned_substitutions": 0,
+                "missed": 0,
+                "skipped": 0,
+                "completion_pct": 0.0,
+                "strict_completion_pct": 0.0,
+            }
+        query = query.join(
+            AssistantPlanEntry,
+            AssistantPlanEntry.planned_workout_id == PlannedWorkout.id,
+        )
+
+    workouts_result = await session.execute(query)
     workouts = _dedupe_workouts(list(workouts_result.scalars().all()))
     total_planned = len(workouts)
     if total_planned == 0:
@@ -345,11 +389,12 @@ async def get_plan_adherence(
 
 async def get_current_plan(session: AsyncSession) -> dict | None:
     """Get the active training plan."""
-    result = await session.execute(
-        select(TrainingPlan)
-        .order_by(TrainingPlan.created_at.desc())
-        .limit(1)
-    )
+    query = select(TrainingPlan).order_by(TrainingPlan.created_at.desc()).limit(1)
+    if _assistant_mode():
+        query = select(TrainingPlan).where(TrainingPlan.source == "assistant").order_by(
+            TrainingPlan.created_at.desc()
+        ).limit(1)
+    result = await session.execute(query)
     plan = result.scalar_one_or_none()
     if not plan:
         return None

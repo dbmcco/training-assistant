@@ -9,6 +9,7 @@ from uuid import UUID
 from sqlalchemy import and_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.config import settings
 from src.db.models import DailyBriefing, PlannedWorkout, RecommendationChange
 from src.services.garmin_refresh import refresh_garmin_daily_data_on_demand
 from src.services.garmin_writeback import (
@@ -17,6 +18,10 @@ from src.services.garmin_writeback import (
 )
 
 ALLOWED_DECISIONS = {"approved", "rejected", "changes_requested"}
+
+
+def _assistant_mode() -> bool:
+    return settings.plan_ownership_mode.strip().lower() == "assistant"
 
 
 async def recommendation_table_available(db: AsyncSession) -> bool:
@@ -317,7 +322,7 @@ async def decide_recommendation(
         if str(writeback.get("status", "")).lower() == "success":
             # Force a calendar pull so app tables reflect the approved change quickly.
             refresh_result = await refresh_garmin_daily_data_on_demand(
-                include_calendar=True,
+                include_calendar=not _assistant_mode(),
                 force=True,
             )
             if isinstance(refresh_result, dict):

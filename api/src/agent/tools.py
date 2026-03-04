@@ -18,6 +18,7 @@ from src.db.models import (
     PlannedWorkout,
     Race,
 )
+from src.services.assistant_plan import generate_assistant_plan, is_assistant_owned_mode
 from src.services.units import (
     format_distance_from_kilometers,
     format_distance_from_meters,
@@ -104,6 +105,43 @@ TOOL_DEFINITIONS: list[dict] = [
                     "description": "Time period: 'this_week', 'last_week', or 'this_month'.",
                     "default": "this_week",
                     "enum": ["this_week", "last_week", "this_month"],
+                },
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "get_plan_mode",
+        "description": "Get current plan ownership mode (assistant-owned vs Garmin-owned).",
+        "input_schema": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    },
+    {
+        "name": "build_assistant_plan",
+        "description": (
+            "Generate or refresh an assistant-owned rolling training plan and optionally "
+            "sync near-term workouts to Garmin."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "days_ahead": {
+                    "type": "integer",
+                    "description": "How many days to generate ahead.",
+                    "default": 14,
+                },
+                "overwrite": {
+                    "type": "boolean",
+                    "description": "Replace existing assistant-owned future workouts.",
+                    "default": True,
+                },
+                "sync_to_garmin": {
+                    "type": "boolean",
+                    "description": "Push generated workouts to Garmin calendar.",
+                    "default": True,
                 },
             },
             "required": [],
@@ -334,6 +372,8 @@ async def execute_tool(name: str, args: dict, db: AsyncSession) -> str:
         "get_daily_metrics": _get_daily_metrics,
         "get_readiness_score": _get_readiness_score,
         "get_plan_adherence": _get_plan_adherence,
+        "get_plan_mode": _get_plan_mode,
+        "build_assistant_plan": _build_assistant_plan,
         "get_upcoming_workouts": _get_upcoming_workouts,
         "get_plan_changes": _get_plan_changes,
         "get_race_countdown": _get_race_countdown,
@@ -580,6 +620,46 @@ async def _get_plan_adherence(db: AsyncSession, period: str = "this_week") -> st
         lines.append(f"  Strict completion rate: {strict_pct}%")
     if pending_future:
         lines.append(f"  Pending future workouts: {pending_future}")
+    return "\n".join(lines)
+
+
+async def _get_plan_mode(db: AsyncSession) -> str:
+    _ = db
+    mode = "assistant" if is_assistant_owned_mode() else "garmin"
+    return f"Plan ownership mode: {mode}"
+
+
+async def _build_assistant_plan(
+    db: AsyncSession,
+    days_ahead: int = 14,
+    overwrite: bool = True,
+    sync_to_garmin: bool = True,
+) -> str:
+    if not is_assistant_owned_mode():
+        return (
+            "Cannot build assistant plan: plan ownership mode is not assistant. "
+            "Set plan_ownership_mode=assistant first."
+        )
+
+    result = await generate_assistant_plan(
+        db,
+        days_ahead=days_ahead,
+        overwrite=overwrite,
+        sync_to_garmin=sync_to_garmin,
+    )
+    await db.commit()
+    lines = [
+        "Assistant plan generated.",
+        f"  Phase: {result.get('phase')}",
+        f"  Window: {result.get('window_start')} -> {result.get('window_end')}",
+        f"  Created workouts: {result.get('created_workouts')}",
+        (
+            "  Garmin sync: "
+            f"{result.get('synced_success', 0)} success / "
+            f"{result.get('synced_failed', 0)} failed / "
+            f"{result.get('synced_skipped', 0)} skipped"
+        ),
+    ]
     return "\n".join(lines)
 
 

@@ -187,6 +187,21 @@ The web app proxies `/api` requests to `http://127.0.0.1:8000`.
 - Refresh backfill window is controlled by `GARMIN_REFRESH_DAYS_BACK` (default `1`)
 - This refresh endpoint is Garmin-focused; Peloton import runs via `garmin-connect-sync/run_sync.sh`
 
+## Assistant-Owned Plan Mode
+
+If you want the agent (not Garmin adaptive planning) to own your training plan:
+
+- Set `PLAN_OWNERSHIP_MODE=assistant` in `api/.env`
+- Delete/pause Garmin adaptive training plan in Garmin Connect
+- Use `POST /api/v1/plan/assistant/generate` to build a rolling plan
+- The app will keep ingesting Garmin activities/recovery metrics, but skip Garmin calendar ingestion on refresh
+
+Behavior in this mode:
+
+- Plan views and adherence are scoped to assistant-generated workouts
+- Agent can generate and refresh upcoming workouts, then sync near-term sessions back to Garmin
+- Daily/weekly monitoring still uses Garmin and Peloton-combined completion data
+
 ## Privacy and Secrets
 
 - `.env` files are gitignored; use `api/.env.example` as a template

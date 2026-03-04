@@ -7,8 +7,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.config import settings
 from src.db.connection import get_db
-from src.db.models import GarminActivity, PlannedWorkout
+from src.db.models import AssistantPlanEntry, GarminActivity, PlannedWorkout
+from src.services.assistant_plan import (
+    assistant_plan_table_available,
+    generate_assistant_plan,
+    is_assistant_owned_mode,
+)
 from src.services.plan_engine import get_current_plan, get_plan_adherence
 from src.services.plan_changes import list_recent_plan_changes
 
@@ -75,6 +81,13 @@ async def list_workouts(
     db: AsyncSession = Depends(get_db),
 ):
     query = select(PlannedWorkout).order_by(PlannedWorkout.date)
+    if is_assistant_owned_mode():
+        if not await assistant_plan_table_available(db):
+            return []
+        query = query.join(
+            AssistantPlanEntry,
+            AssistantPlanEntry.planned_workout_id == PlannedWorkout.id,
+        )
     conditions = []
     if start_date:
         conditions.append(PlannedWorkout.date >= start_date)
@@ -179,3 +192,45 @@ async def plan_changes(
         days_back=days_back,
         limit=limit,
     )
+
+
+@router.get("/owner")
+async def plan_owner_mode():
+    mode = settings.plan_ownership_mode.strip().lower()
+    return {
+        "mode": mode,
+        "assistant_owned": mode == "assistant",
+    }
+
+
+@router.post("/assistant/generate")
+async def assistant_generate_plan(
+    days_ahead: int = Query(default=14, ge=3, le=56),
+    overwrite: bool = Query(default=True),
+    sync_to_garmin: bool = Query(default=True),
+    db: AsyncSession = Depends(get_db),
+):
+    if not is_assistant_owned_mode():
+        raise HTTPException(
+            status_code=400,
+            detail="Assistant plan generation requires plan_ownership_mode=assistant.",
+        )
+
+    try:
+        result = await generate_assistant_plan(
+            db,
+            days_ahead=days_ahead,
+            overwrite=overwrite,
+            sync_to_garmin=sync_to_garmin,
+        )
+        await db.commit()
+        return result
+    except ValueError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # pragma: no cover - defensive API fallback
+        await db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to generate assistant plan: {exc}",
+        ) from exc

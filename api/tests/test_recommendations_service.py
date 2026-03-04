@@ -4,6 +4,7 @@ from uuid import uuid4
 
 import pytest
 
+from src.config import settings
 from src.db.models import PlannedWorkout, RecommendationChange
 from src.services.recommendations import decide_recommendation
 
@@ -34,6 +35,7 @@ async def test_approve_recommendation_refreshes_calendar_after_successful_writeb
     db = AsyncMock()
 
     with (
+        patch.object(settings, "plan_ownership_mode", "assistant"),
         patch(
             "src.services.recommendations._find_target_workout",
             AsyncMock(return_value=target),
@@ -54,7 +56,7 @@ async def test_approve_recommendation_refreshes_calendar_after_successful_writeb
             note="Looks good",
         )
 
-    refresh_mock.assert_awaited_once_with(include_calendar=True, force=True)
+    refresh_mock.assert_awaited_once_with(include_calendar=False, force=True)
     assert updated.status == "approved"
     assert updated.garmin_sync_status == "success"
     assert isinstance(updated.garmin_sync_result, dict)

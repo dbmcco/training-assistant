@@ -304,6 +304,40 @@ export interface PlannedWorkout {
   status: string
 }
 
+export interface AssistantPlanGenerationResult {
+  mode: string
+  phase: string
+  race:
+    | {
+        id: string
+        name: string
+        date: string
+        distance_type: string
+        days_to_race: number
+      }
+    | null
+  window_start: string
+  window_end: string
+  days_ahead: number
+  plan_id: string
+  deleted_existing: number
+  created_workouts: number
+  synced_success: number
+  synced_failed: number
+  synced_skipped: number
+  workouts: Array<{
+    id: string
+    date: string | null
+    discipline: string
+    workout_type: string
+    target_duration: number | null
+    status: string
+    is_locked: boolean
+    garmin_sync_status: string | null
+    garmin_workout_id: string | null
+  }>
+}
+
 export interface PlanChangeEvent {
   id: string
   source: string

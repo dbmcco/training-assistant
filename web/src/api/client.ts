@@ -6,6 +6,7 @@ import type {
   Race,
   Conversation,
   PlannedWorkout,
+  AssistantPlanGenerationResult,
   PlanChangeEvent,
   PlanActivity,
   Adherence,
@@ -178,6 +179,23 @@ export async function fetchPlanChanges(options?: {
   const suffix = params.toString() ? `?${params.toString()}` : ''
   const res = await fetchWithTimeout(`${BASE}/plan/changes${suffix}`)
   if (!res.ok) throw new Error(`Plan changes fetch failed: ${res.status}`)
+  return res.json()
+}
+
+export async function generateAssistantPlan(options?: {
+  daysAhead?: number
+  overwrite?: boolean
+  syncToGarmin?: boolean
+}): Promise<AssistantPlanGenerationResult> {
+  const params = new URLSearchParams()
+  if (options?.daysAhead != null) params.set('days_ahead', String(options.daysAhead))
+  if (options?.overwrite != null) params.set('overwrite', String(options.overwrite))
+  if (options?.syncToGarmin != null) params.set('sync_to_garmin', String(options.syncToGarmin))
+  const suffix = params.toString() ? `?${params.toString()}` : ''
+  const res = await fetchWithTimeout(`${BASE}/plan/assistant/generate${suffix}`, {
+    method: 'POST',
+  }, 90_000)
+  if (!res.ok) throw new Error(`Assistant plan generation failed: ${res.status}`)
   return res.json()
 }
 

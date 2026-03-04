@@ -22,6 +22,10 @@ PID_FILE = LOCK_DIR / "pid"
 STATE_FILE = Path("/tmp/training-assistant-garmin-refresh-state.json")
 
 
+def _assistant_mode() -> bool:
+    return settings.plan_ownership_mode.strip().lower() == "assistant"
+
+
 def _default_garmin_repo() -> Path:
     # .../training-assistant/api/src/services -> .../experiments
     experiments_root = Path(__file__).resolve().parents[4]
@@ -195,6 +199,11 @@ def _refresh_dashboard_data(*, include_calendar: bool = False, force: bool = Fal
 
     timeout_seconds = max(settings.garmin_refresh_timeout_seconds, 5)
     days_back = max(settings.garmin_refresh_days_back, 0)
+    include_calendar_requested = include_calendar
+    calendar_skipped_reason: str | None = None
+    if include_calendar and _assistant_mode():
+        include_calendar = False
+        calendar_skipped_reason = "assistant_owned_plan_mode"
     try:
         commands: list[list[str]] = [
             [str(python_bin), str(sync_script), "--daily-only", "--days-back", str(days_back)],
@@ -217,6 +226,8 @@ def _refresh_dashboard_data(*, include_calendar: bool = False, force: bool = Fal
         return {
             "status": "success",
             "include_calendar": include_calendar,
+            "include_calendar_requested": include_calendar_requested,
+            "calendar_skipped_reason": calendar_skipped_reason,
             "days_back": days_back,
             "results": results,
         }

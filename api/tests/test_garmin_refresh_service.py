@@ -69,3 +69,27 @@ def test_refresh_clamps_negative_days_back(tmp_path, monkeypatch):
     assert result["status"] == "success"
     assert result["days_back"] == 0
     assert captured[0][-2:] == ["--days-back", "0"]
+
+
+def test_refresh_skips_calendar_sync_in_assistant_mode(tmp_path, monkeypatch):
+    _prepare_fake_runtime(tmp_path, monkeypatch)
+    captured: list[list[str]] = []
+
+    def fake_run_cmd(cmd: list[str], cwd: Path, timeout_seconds: int):
+        captured.append(cmd)
+        return {"status": "success", "command": cmd}
+
+    monkeypatch.setattr("src.services.garmin_refresh._run_cmd", fake_run_cmd)
+    monkeypatch.setattr(settings, "garmin_refresh_enabled", True)
+    monkeypatch.setattr(settings, "garmin_refresh_timeout_seconds", 30)
+    monkeypatch.setattr(settings, "garmin_refresh_min_interval_seconds", 0)
+    monkeypatch.setattr(settings, "garmin_refresh_days_back", 1)
+    monkeypatch.setattr(settings, "plan_ownership_mode", "assistant")
+
+    result = _refresh_dashboard_data(include_calendar=True, force=True)
+
+    assert result["status"] == "success"
+    assert result["include_calendar"] is False
+    assert result["include_calendar_requested"] is True
+    assert result["calendar_skipped_reason"] == "assistant_owned_plan_mode"
+    assert len(captured) == 1

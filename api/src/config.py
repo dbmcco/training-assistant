@@ -28,6 +28,10 @@ class Settings(BaseSettings):
     garmin_refresh_timeout_seconds: int = 90
     garmin_refresh_min_interval_seconds: int = 120
     garmin_refresh_days_back: int = 1
+    plan_ownership_mode: str = "assistant"
+    assistant_plan_default_days_ahead: int = 14
+    assistant_plan_lock_window_days: int = 2
+    assistant_plan_sync_days: int = 7
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 

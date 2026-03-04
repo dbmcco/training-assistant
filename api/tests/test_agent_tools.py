@@ -14,6 +14,8 @@ EXPECTED_TOOL_NAMES = [
     "get_daily_metrics",
     "get_readiness_score",
     "get_plan_adherence",
+    "get_plan_mode",
+    "build_assistant_plan",
     "get_upcoming_workouts",
     "get_plan_changes",
     "get_race_countdown",
@@ -117,12 +119,57 @@ async def test_execute_get_plan_adherence():
 
 
 @pytest.mark.asyncio
+async def test_execute_get_plan_mode():
+    from src.db.connection import async_session
+
+    async with async_session() as session:
+        result = await execute_tool("get_plan_mode", {}, session)
+    assert isinstance(result, str)
+    assert "plan ownership mode" in result.lower()
+
+
+@pytest.mark.asyncio
 async def test_execute_get_upcoming_workouts():
     from src.db.connection import async_session
 
     async with async_session() as session:
         result = await execute_tool("get_upcoming_workouts", {"count": 3}, session)
     assert isinstance(result, str)
+
+
+@pytest.mark.asyncio
+async def test_execute_build_assistant_plan(monkeypatch):
+    from src.db.connection import async_session
+
+    monkeypatch.setattr("src.agent.tools.is_assistant_owned_mode", lambda: True)
+
+    async def fake_generate_assistant_plan(
+        db,
+        *,
+        days_ahead: int = 14,
+        overwrite: bool = True,
+        sync_to_garmin: bool = True,
+    ):
+        _ = (db, days_ahead, overwrite, sync_to_garmin)
+        return {
+            "phase": "build",
+            "window_start": "2026-03-04",
+            "window_end": "2026-03-17",
+            "created_workouts": 12,
+            "synced_success": 7,
+            "synced_failed": 0,
+            "synced_skipped": 5,
+        }
+
+    monkeypatch.setattr("src.agent.tools.generate_assistant_plan", fake_generate_assistant_plan)
+
+    async with async_session() as session:
+        result = await execute_tool(
+            "build_assistant_plan",
+            {"days_ahead": 14, "overwrite": True, "sync_to_garmin": True},
+            session,
+        )
+    assert "assistant plan generated" in result.lower()
 
 
 @pytest.mark.asyncio
