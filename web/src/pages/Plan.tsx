@@ -5,7 +5,6 @@ import {
   fetchPlanWorkouts,
   fetchPlanAdherence,
   fetchPlanChanges,
-  generateAssistantPlan,
   refreshDashboardData,
 } from '../api/client'
 import WeekCalendar from '../components/plan/WeekCalendar'
@@ -107,22 +106,6 @@ export default function Plan() {
     },
   })
 
-  const generatePlanMutation = useMutation({
-    mutationFn: () =>
-      generateAssistantPlan({
-        daysAhead: 14,
-        overwrite: true,
-        syncToGarmin: true,
-      }),
-    onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: ['planWorkouts'] })
-      queryClient.invalidateQueries({ queryKey: ['planAdherence'] })
-      queryClient.invalidateQueries({ queryKey: ['planActivities'] })
-      queryClient.invalidateQueries({ queryKey: ['planChanges'] })
-      queryClient.invalidateQueries({ queryKey: ['dashboard', 'today'] })
-    },
-  })
-
   const atAGlance = useMemo(() => {
     const planned = (workouts ?? []).length
     const done = adherence?.completed ?? (activities ?? []).length
@@ -189,14 +172,6 @@ export default function Plan() {
         <div className="flex items-center gap-3">
           <button
             type="button"
-            onClick={() => generatePlanMutation.mutate()}
-            disabled={generatePlanMutation.isPending}
-            className="rounded-lg border border-blue-700/60 bg-blue-500/10 px-3 py-1.5 text-xs text-blue-200 hover:bg-blue-500/20 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {generatePlanMutation.isPending ? 'Building Plan...' : 'Build Assistant Plan'}
-          </button>
-          <button
-            type="button"
             onClick={() => refreshMutation.mutate()}
             disabled={refreshMutation.isPending}
             className="rounded-lg border border-gray-700 px-3 py-1.5 text-xs text-gray-200 hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
@@ -245,18 +220,6 @@ export default function Plan() {
               No adaptive-plan changes detected recently.
             </p>
           )}
-        </div>
-      )}
-
-      {generatePlanMutation.isError && (
-        <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-xs text-red-200">
-          Failed to generate assistant plan.
-        </div>
-      )}
-      {generatePlanMutation.isSuccess && (
-        <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-xs text-emerald-200">
-          Assistant plan built: {generatePlanMutation.data.created_workouts} workouts, Garmin sync{' '}
-          {generatePlanMutation.data.synced_success}/{generatePlanMutation.data.created_workouts}.
         </div>
       )}
 
