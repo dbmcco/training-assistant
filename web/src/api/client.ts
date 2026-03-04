@@ -6,6 +6,7 @@ import type {
   Race,
   Conversation,
   PlannedWorkout,
+  PlanChangeEvent,
   PlanActivity,
   Adherence,
   AthleteProfile,
@@ -165,6 +166,19 @@ export async function fetchPlanAdherence(
     strict_rate:
       raw.strict_completion_pct != null ? raw.strict_completion_pct / 100 : undefined,
   }
+}
+
+export async function fetchPlanChanges(options?: {
+  daysBack?: number
+  limit?: number
+}): Promise<PlanChangeEvent[]> {
+  const params = new URLSearchParams()
+  if (options?.daysBack != null) params.set('days_back', String(options.daysBack))
+  if (options?.limit != null) params.set('limit', String(options.limit))
+  const suffix = params.toString() ? `?${params.toString()}` : ''
+  const res = await fetchWithTimeout(`${BASE}/plan/changes${suffix}`)
+  if (!res.ok) throw new Error(`Plan changes fetch failed: ${res.status}`)
+  return res.json()
 }
 
 export async function fetchPlanActivities(

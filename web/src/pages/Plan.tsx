@@ -1,6 +1,12 @@
 import { useState, useCallback, useMemo, useEffect } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { fetchPlanActivities, fetchPlanWorkouts, fetchPlanAdherence } from '../api/client'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import {
+  fetchPlanActivities,
+  fetchPlanWorkouts,
+  fetchPlanAdherence,
+  fetchPlanChanges,
+  refreshDashboardData,
+} from '../api/client'
 import WeekCalendar from '../components/plan/WeekCalendar'
 import AdherenceBar from '../components/plan/AdherenceBar'
 import Races from './Races'
@@ -22,7 +28,20 @@ function formatDate(d: Date): string {
   return `${y}-${m}-${day}`
 }
 
+function formatTimestamp(value: string | null): string {
+  if (!value) return ''
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) return value
+  return parsed.toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  })
+}
+
 export default function Plan() {
+  const queryClient = useQueryClient()
   const [weekStart, setWeekStart] = useState<Date>(() => getMonday(new Date()))
   const currentWeekStartStr = useMemo(() => formatDate(getMonday(new Date())), [])
   const todayStart = useMemo(() => {
@@ -65,6 +84,26 @@ export default function Plan() {
   } = useQuery({
     queryKey: ['planActivities', startStr, endStr],
     queryFn: () => fetchPlanActivities(startStr, endStr),
+  })
+
+  const {
+    data: recentChanges,
+    isLoading: changesLoading,
+    isError: changesError,
+  } = useQuery({
+    queryKey: ['planChanges'],
+    queryFn: () => fetchPlanChanges({ daysBack: 7, limit: 12 }),
+  })
+
+  const refreshMutation = useMutation({
+    mutationFn: () => refreshDashboardData({ includeCalendar: true, force: true }),
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['planWorkouts'] })
+      queryClient.invalidateQueries({ queryKey: ['planAdherence'] })
+      queryClient.invalidateQueries({ queryKey: ['planActivities'] })
+      queryClient.invalidateQueries({ queryKey: ['planChanges'] })
+      queryClient.invalidateQueries({ queryKey: ['dashboard', 'today'] })
+    },
   })
 
   const atAGlance = useMemo(() => {
@@ -130,15 +169,59 @@ export default function Plan() {
     <div className="p-6 space-y-8">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Plan & Races</h1>
-        <button
-          onClick={() => setWeekStart(getMonday(new Date()))}
-          className="text-sm text-blue-400 hover:text-blue-300 transition-colors"
-        >
-          Today
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => refreshMutation.mutate()}
+            disabled={refreshMutation.isPending}
+            className="rounded-lg border border-gray-700 px-3 py-1.5 text-xs text-gray-200 hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {refreshMutation.isPending ? 'Refreshing...' : 'Refresh Garmin'}
+          </button>
+          <button
+            onClick={() => setWeekStart(getMonday(new Date()))}
+            className="text-sm text-blue-400 hover:text-blue-300 transition-colors"
+          >
+            Today
+          </button>
+        </div>
       </div>
 
       <AdherenceBar adherence={adherence} isLoading={adherenceLoading} />
+
+      {changesError ? (
+        <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-xs text-amber-200">
+          Could not load Garmin plan change history.
+        </div>
+      ) : (
+        <div className="rounded-xl border border-gray-800 bg-gray-900 px-4 py-3">
+          <div className="mb-2 flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-gray-200">Recent Garmin Changes</h2>
+            <span className="text-[11px] text-gray-500">Last 7 days</span>
+          </div>
+          {changesLoading ? (
+            <p className="text-xs text-gray-500">Loading changes...</p>
+          ) : recentChanges && recentChanges.length > 0 ? (
+            <div className="space-y-1.5">
+              {recentChanges.slice(0, 6).map((change) => (
+                <div
+                  key={change.id}
+                  className="rounded-md border border-gray-800 bg-gray-950/60 px-3 py-2"
+                >
+                  <p className="text-xs text-gray-200">{change.summary}</p>
+                  <p className="text-[11px] text-gray-500">
+                    {formatTimestamp(change.detected_at)}
+                  </p>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs text-gray-500">
+              No adaptive-plan changes detected recently.
+            </p>
+          )}
+        </div>
+      )}
 
       {hasQueryError && (
         <div className="rounded-xl bg-amber-500/10 border border-amber-500/30 px-4 py-3 text-xs text-amber-200">

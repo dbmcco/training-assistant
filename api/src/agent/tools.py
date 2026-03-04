@@ -23,7 +23,10 @@ from src.services.units import (
     format_distance_from_meters,
     format_pace_per_mile,
 )
-from src.services.garmin_refresh import refresh_garmin_daily_data_on_demand
+from src.services.plan_changes import (
+    list_recent_plan_changes,
+    refresh_with_plan_change_tracking,
+)
 from src.services.recovery_time import normalize_recovery_time_hours
 from src.services.workout_duration import format_planned_duration
 
@@ -119,6 +122,29 @@ TOOL_DEFINITIONS: list[dict] = [
                     "type": "integer",
                     "description": "Number of upcoming workouts to return.",
                     "default": 5,
+                },
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "get_plan_changes",
+        "description": (
+            "Get recent Garmin-driven plan changes (added, moved, updated, removed workouts) "
+            "so coaching advice reflects adaptive schedule shifts."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "days_back": {
+                    "type": "integer",
+                    "description": "How many days of change history to inspect.",
+                    "default": 7,
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum number of changes to return.",
+                    "default": 10,
                 },
             },
             "required": [],
@@ -309,6 +335,7 @@ async def execute_tool(name: str, args: dict, db: AsyncSession) -> str:
         "get_readiness_score": _get_readiness_score,
         "get_plan_adherence": _get_plan_adherence,
         "get_upcoming_workouts": _get_upcoming_workouts,
+        "get_plan_changes": _get_plan_changes,
         "get_race_countdown": _get_race_countdown,
         "get_training_load": _get_training_load,
         "modify_workout": _modify_workout,
@@ -574,6 +601,27 @@ async def _get_upcoming_workouts(db: AsyncSession, count: int = 5) -> str:
         if w.get("description"):
             line += f": {w['description']}"
         lines.append(line)
+    return "\n".join(lines)
+
+
+async def _get_plan_changes(
+    db: AsyncSession,
+    days_back: int = 7,
+    limit: int = 10,
+) -> str:
+    events = await list_recent_plan_changes(
+        db,
+        days_back=days_back,
+        limit=limit,
+    )
+    if not events:
+        return f"No Garmin plan changes detected in the last {days_back} days."
+
+    lines = [f"Recent Garmin Plan Changes (last {days_back} days):"]
+    for event in events:
+        when = event.get("detected_at", "")
+        summary = event.get("summary", "Plan changed.")
+        lines.append(f"- {summary} [{when}]")
     return "\n".join(lines)
 
 
@@ -858,11 +906,11 @@ async def _get_active_alerts(db: AsyncSession, limit: int = 10) -> str:
 async def _refresh_garmin_data(
     db: AsyncSession, include_calendar: bool = True, force: bool = True
 ) -> str:
-    # db is required by the shared tool signature but unused here.
-    _ = db
-    result = await refresh_garmin_daily_data_on_demand(
+    result, events = await refresh_with_plan_change_tracking(
+        db,
         include_calendar=include_calendar,
         force=force,
+        source="coach_refresh",
     )
 
     status = result.get("status")
@@ -871,6 +919,12 @@ async def _refresh_garmin_data(
             "Garmin refresh: success",
             f"  include_calendar: {bool(result.get('include_calendar', include_calendar))}",
         ]
+        if include_calendar:
+            lines.append(f"  plan_changes_detected: {len(events)}")
+            for event in events[:5]:
+                summary = event.get("summary")
+                if summary:
+                    lines.append(f"  - {summary}")
         if "days_back" in result:
             lines.append(f"  days_back: {result.get('days_back')}")
         for idx, cmd_result in enumerate(result.get("results", [])[:3], start=1):

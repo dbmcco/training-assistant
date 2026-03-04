@@ -236,6 +236,23 @@ class RecommendationChange(Base):
     applied_at = Column(TIMESTAMP(timezone=True))
 
 
+class PlanChangeEvent(Base):
+    __tablename__ = "plan_change_events"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    source = Column(Text, nullable=False, default="garmin_refresh")
+    event_type = Column(Text, nullable=False)
+    workout_id = Column(UUID(as_uuid=True), nullable=True)
+    workout_date = Column(Date, nullable=True)
+    previous_workout_date = Column(Date, nullable=True)
+    discipline = Column(Text, nullable=True)
+    workout_type = Column(Text, nullable=True)
+    changed_fields = Column(JSONB, nullable=True)
+    previous_values = Column(JSONB, nullable=True)
+    new_values = Column(JSONB, nullable=True)
+    detected_at = Column(TIMESTAMP(timezone=True))
+
+
 class Conversation(Base):
     __tablename__ = "conversations"
 

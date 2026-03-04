@@ -42,16 +42,27 @@ async def test_dashboard_today():
 async def test_dashboard_refresh(monkeypatch):
     """POST /api/v1/dashboard/refresh should call refresh service and return status."""
 
-    async def fake_refresh(*, include_calendar: bool = False, force: bool = False):
-        return {
-            "status": "success",
-            "include_calendar": include_calendar,
-            "force": force,
-        }
+    async def fake_refresh_with_tracking(
+        db,
+        *,
+        include_calendar: bool = False,
+        force: bool = False,
+        source: str = "dashboard_refresh",
+        horizon_days: int = 21,
+    ):
+        _ = (db, source, horizon_days)
+        return (
+            {
+                "status": "success",
+                "include_calendar": include_calendar,
+                "force": force,
+            },
+            [],
+        )
 
     monkeypatch.setattr(
-        "src.routers.dashboard.refresh_garmin_daily_data_on_demand",
-        fake_refresh,
+        "src.routers.dashboard.refresh_with_plan_change_tracking",
+        fake_refresh_with_tracking,
     )
 
     async with AsyncClient(

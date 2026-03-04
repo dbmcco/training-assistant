@@ -108,3 +108,17 @@ async def test_plan_adherence_with_dates():
     assert resp.status_code == 200
     data = resp.json()
     assert "total_planned" in data
+
+
+@pytest.mark.asyncio
+async def test_plan_changes():
+    """GET /api/v1/plan/changes should return change events list."""
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        resp = await client.get(
+            "/api/v1/plan/changes",
+            params={"days_back": 7, "limit": 10},
+        )
+    assert resp.status_code == 200
+    assert isinstance(resp.json(), list)

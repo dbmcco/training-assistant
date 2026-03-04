@@ -25,7 +25,7 @@ from src.services.plan_engine import (
     get_plan_adherence,
     get_today_workout,
 )
-from src.services.garmin_refresh import refresh_garmin_daily_data_on_demand
+from src.services.plan_changes import refresh_with_plan_change_tracking
 from src.services.recovery_time import normalize_recovery_time_hours
 from src.services.readiness import compute_readiness
 from src.services.recommendations import (
@@ -93,12 +93,23 @@ async def dashboard_refresh(
         default=False,
         description="Bypass short refresh cooldown and run immediately.",
     ),
+    db: AsyncSession = Depends(get_db),
 ):
     """Refresh Garmin data on demand (typically called on app refresh)."""
-    return await refresh_garmin_daily_data_on_demand(
+    result, events = await refresh_with_plan_change_tracking(
+        db,
         include_calendar=include_calendar,
         force=force,
+        source="dashboard_refresh",
     )
+    if not events:
+        return result
+
+    return {
+        **result,
+        "plan_changes_detected": len(events),
+        "plan_changes": events[:10],
+    }
 
 
 @router.get("/today")

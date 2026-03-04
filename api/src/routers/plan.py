@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.db.connection import get_db
 from src.db.models import GarminActivity, PlannedWorkout
 from src.services.plan_engine import get_current_plan, get_plan_adherence
+from src.services.plan_changes import list_recent_plan_changes
 
 router = APIRouter(prefix="/api/v1/plan", tags=["plan"])
 
@@ -165,3 +166,16 @@ async def plan_adherence(
     if start is None:
         start = end - timedelta(days=28)
     return await get_plan_adherence(db, start, end)
+
+
+@router.get("/changes")
+async def plan_changes(
+    days_back: int = Query(default=7, ge=1, le=60),
+    limit: int = Query(default=25, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+):
+    return await list_recent_plan_changes(
+        db,
+        days_back=days_back,
+        limit=limit,
+    )

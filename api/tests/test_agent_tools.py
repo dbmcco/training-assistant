@@ -15,6 +15,7 @@ EXPECTED_TOOL_NAMES = [
     "get_readiness_score",
     "get_plan_adherence",
     "get_upcoming_workouts",
+    "get_plan_changes",
     "get_race_countdown",
     "get_training_load",
     "modify_workout",
@@ -125,6 +126,15 @@ async def test_execute_get_upcoming_workouts():
 
 
 @pytest.mark.asyncio
+async def test_execute_get_plan_changes():
+    from src.db.connection import async_session
+
+    async with async_session() as session:
+        result = await execute_tool("get_plan_changes", {"days_back": 7, "limit": 5}, session)
+    assert isinstance(result, str)
+
+
+@pytest.mark.asyncio
 async def test_execute_get_race_countdown():
     from src.db.connection import async_session
 
@@ -202,21 +212,39 @@ async def test_execute_unknown_tool():
 async def test_execute_refresh_garmin_data(monkeypatch):
     from src.db.connection import async_session
 
-    async def fake_refresh(*, include_calendar: bool = False, force: bool = False):
-        return {
-            "status": "success",
-            "include_calendar": include_calendar,
-            "days_back": 1,
-            "results": [
+    async def fake_refresh_with_tracking(
+        db,
+        *,
+        include_calendar: bool = False,
+        force: bool = False,
+        source: str = "coach_refresh",
+        horizon_days: int = 21,
+    ):
+        _ = (db, source, horizon_days)
+        return (
+            {
+                "status": "success",
+                "include_calendar": include_calendar,
+                "days_back": 1,
+                "results": [
+                    {
+                        "status": "success",
+                        "command": ["python3", "sync.py", "--daily-only", "--days-back", "1"],
+                        "stdout": "Saved daily summary for 2026-03-02.",
+                    }
+                ],
+            },
+            [
                 {
-                    "status": "success",
-                    "command": ["python3", "sync.py", "--daily-only", "--days-back", "1"],
-                    "stdout": "Saved daily summary for 2026-03-02.",
+                    "summary": "Moved run workout from 2026-03-04 to 2026-03-05.",
                 }
             ],
-        }
+        )
 
-    monkeypatch.setattr("src.agent.tools.refresh_garmin_daily_data_on_demand", fake_refresh)
+    monkeypatch.setattr(
+        "src.agent.tools.refresh_with_plan_change_tracking",
+        fake_refresh_with_tracking,
+    )
 
     async with async_session() as session:
         result = await execute_tool(
@@ -226,3 +254,4 @@ async def test_execute_refresh_garmin_data(monkeypatch):
         )
     assert "success" in result.lower()
     assert "include_calendar: True" in result
+    assert "plan_changes_detected: 1" in result

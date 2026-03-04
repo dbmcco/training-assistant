@@ -304,6 +304,22 @@ export interface PlannedWorkout {
   status: string
 }
 
+export interface PlanChangeEvent {
+  id: string
+  source: string
+  event_type: 'added' | 'removed' | 'rescheduled' | 'updated'
+  workout_id: string | null
+  workout_date: string | null
+  previous_workout_date: string | null
+  discipline: string | null
+  workout_type: string | null
+  changed_fields: string[]
+  previous_values: Record<string, unknown> | null
+  new_values: Record<string, unknown> | null
+  detected_at: string | null
+  summary: string
+}
+
 export interface PlanActivity {
   id: string
   activity_date: string | null
