@@ -31,8 +31,10 @@ from src.db.models import (
     AthleteBiometrics,
     AthleteProfile,
     Conversation,
+    GarminActivity,
     GarminDailySummary,
     Message,
+    PlannedWorkout,
     Race,
     RecommendationChange,
 )
@@ -184,9 +186,7 @@ async def _build_dynamic_context(db: AsyncSession) -> dict:
 
     # Biometrics
     bio_result = await db.execute(
-        select(AthleteBiometrics)
-        .order_by(AthleteBiometrics.date.desc())
-        .limit(1)
+        select(AthleteBiometrics).order_by(AthleteBiometrics.date.desc()).limit(1)
     )
     bio = bio_result.scalar_one_or_none()
     biometrics = {}
@@ -321,6 +321,147 @@ def _format_memory_context(memories: list[dict]) -> str:
     return "\n".join(lines) if len(lines) > 1 else ""
 
 
+def _classify_activity_discipline_lite(activity: GarminActivity) -> str:
+    text = f"{activity.sport_type or ''} {activity.activity_type or ''}".lower()
+    if "run" in text or "trail" in text:
+        return "run"
+    if "bike" in text or "cycl" in text or "peloton" in text or "spin" in text:
+        return "bike"
+    if "swim" in text or "pool" in text or "open_water" in text:
+        return "swim"
+    if "strength" in text or "lift" in text:
+        return "strength"
+    return "other"
+
+
+def _normalize_planned_discipline(value: str | None) -> str:
+    raw = (value or "").strip().lower()
+    if raw.startswith("run") or "trail" in raw:
+        return "run"
+    if raw.startswith("bike") or "cycl" in raw or "peloton" in raw or "spin" in raw:
+        return "bike"
+    if raw.startswith("swim") or "pool" in raw or "open_water" in raw:
+        return "swim"
+    if raw.startswith("strength") or "yoga" in raw or "pilates" in raw:
+        return "strength"
+    return raw if raw else "other"
+
+
+def _format_training_summary(
+    activities: list[GarminActivity],
+    planned: list[PlannedWorkout],
+    adherence: dict | None,
+) -> str:
+    today = date.today()
+    seven_days_ago = today - timedelta(days=7)
+
+    disc_order = ["run", "bike", "swim", "strength"]
+
+    actual_by_disc: dict[str, list[GarminActivity]] = {d: [] for d in disc_order}
+    for a in activities:
+        disc = _classify_activity_discipline_lite(a)
+        if disc in actual_by_disc:
+            actual_by_disc[disc].append(a)
+
+    planned_by_disc: dict[str, list[PlannedWorkout]] = {d: [] for d in disc_order}
+    for w in planned:
+        if w.date and seven_days_ago <= w.date <= today:
+            disc = _normalize_planned_discipline(w.discipline)
+            if disc in planned_by_disc:
+                planned_by_disc[disc].append(w)
+
+    lines = ["## Recent Training (Last 7 Days)"]
+
+    has_data = False
+    for disc in disc_order:
+        acts = actual_by_disc[disc]
+        count = len(acts)
+        total_dur_s = sum(a.duration_seconds or 0.0 for a in acts)
+        total_dist_m = sum(a.distance_meters or 0.0 for a in acts)
+        planned_count = len(planned_by_disc[disc])
+
+        if count == 0 and planned_count == 0:
+            continue
+
+        has_data = True
+        parts = [
+            f"- {disc.capitalize()}: {count} session{'s' if count != 1 else ''} completed"
+        ]
+        if total_dur_s > 0:
+            dur_min = total_dur_s / 60.0
+            if dur_min >= 60:
+                parts.append(f"{dur_min / 60:.1f} hrs total")
+            else:
+                parts.append(f"{dur_min:.0f}min total")
+        if total_dist_m > 0:
+            if disc == "run":
+                parts.append(f"{total_dist_m / 1609.34:.1f} mi")
+            elif disc == "swim":
+                parts.append(f"{total_dist_m / 0.9144:.0f} yd")
+            else:
+                parts.append(f"{total_dist_m / 1000:.1f} km")
+        if count == 0 and planned_count > 0:
+            parts.append(f"({planned_count} planned, {planned_count} missed)")
+        elif planned_count > count:
+            missed = planned_count - count
+            parts.append(f"({planned_count} planned, {missed} missed)")
+        lines.append(" ".join(parts))
+
+    if adherence:
+        completed = adherence.get("completed", 0)
+        due = adherence.get("due_planned", 0)
+        pct = adherence.get("completion_pct", 0.0)
+        missed = adherence.get("missed", 0)
+        if due > 0:
+            has_data = True
+            suffix = ""
+            if missed > 0:
+                suffix = f", {missed} missed"
+            lines.append(
+                f"- Plan adherence: {pct:.0f}% ({completed}/{due} planned workouts completed{suffix})"
+            )
+
+    if not has_data:
+        return ""
+
+    return "\n".join(lines)
+
+
+async def build_training_context(db: AsyncSession) -> str:
+    today = date.today()
+    seven_days_ago = today - timedelta(days=7)
+
+    activity_result = await db.execute(
+        select(GarminActivity)
+        .where(
+            GarminActivity.start_time
+            >= datetime.combine(seven_days_ago, datetime.min.time()).replace(
+                tzinfo=timezone.utc
+            )
+        )
+        .order_by(GarminActivity.start_time.desc())
+    )
+    activities = list(activity_result.scalars().all())
+
+    planned_result = await db.execute(
+        select(PlannedWorkout).where(
+            PlannedWorkout.date >= seven_days_ago,
+            PlannedWorkout.date <= today,
+        )
+    )
+    planned = list(planned_result.scalars().all())
+
+    adherence = None
+    try:
+        from src.services.plan_engine import get_plan_adherence
+
+        adherence = await get_plan_adherence(db, seven_days_ago, today)
+    except Exception:
+        logger.exception("Failed to get plan adherence for training context")
+
+    return _format_training_summary(activities, planned, adherence)
+
+
 async def run_coach(
     user_message: str,
     conversation_id: str | None,
@@ -373,6 +514,8 @@ async def run_coach(
 
     recent_decisions_context = await _build_recent_decisions_context(db)
     memory_context = ""
+    daily_comparison_context = ""
+    training_context = ""
     try:
         memories = await search_relevant_memories(
             db,
@@ -382,6 +525,24 @@ async def run_coach(
         memory_context = _format_memory_context(memories)
     except Exception:
         logger.exception("Failed to retrieve long-term memory context")
+    try:
+        comparison = await execute_tool(
+            "compare_planned_vs_actual",
+            {"days_back": 7},
+            db,
+        )
+        if comparison and not comparison.lower().startswith("error"):
+            if len(comparison) > 2200:
+                comparison = f"{comparison[:2200].rstrip()}..."
+            daily_comparison_context = (
+                f"## Planned vs Actual Snapshot (last 7 days)\n{comparison}"
+            )
+    except Exception:
+        logger.exception("Failed to build planned-vs-actual comparison context")
+    try:
+        training_context = await build_training_context(db)
+    except Exception:
+        logger.exception("Failed to build training context")
 
     system_prompt = build_system_prompt(
         athlete_profile={"notes": profile.notes} if profile else None,
@@ -393,6 +554,10 @@ async def run_coach(
         system_prompt = f"{system_prompt}\n\n{recent_decisions_context}"
     if memory_context:
         system_prompt = f"{system_prompt}\n\n{memory_context}"
+    if daily_comparison_context:
+        system_prompt = f"{system_prompt}\n\n{daily_comparison_context}"
+    if training_context:
+        system_prompt = f"{system_prompt}\n\n{training_context}"
 
     # ------------------------------------------------------------------
     # 4. Load conversation history

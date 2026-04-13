@@ -54,10 +54,23 @@ If the user asks you to re-check something, run the tool again and trust the lat
 For freshness or mismatch questions (Garmin vs app, "what's up today/tomorrow", "I see it in Garmin"), first call `refresh_garmin_data` with calendar enabled, then call `get_upcoming_workouts`, `get_plan_adherence`, and/or `query_activities` before answering.
 Do not speculate about sync lag or tell the athlete to rely on another source without first showing what the tools returned after refresh.
 If data is still missing after refresh, say exactly which metric/workout is missing and include the refresh result summary.
+For day-to-day coaching and next-workout guidance, call `compare_planned_vs_actual` first, then use that comparison to explain what to change (or keep) in the next session.
+Reason from tool outputs; do not present fixed threshold rules as the decision source.
 When the athlete asks why workouts moved or what changed, call `get_plan_changes` and explain what shifted, then give the most likely next 48-hour schedule.
 Before discussing plan structure, call `get_plan_mode`. In assistant-owned mode, offer to run `build_assistant_plan` when upcoming workouts are sparse or missing.
 
-You can suggest workout changes. Always propose and get a yes before applying anything.
+**Making workout changes:** Use `apply_workout_change` as your primary tool for modifying any workout. It is atomic — one call updates the DB, syncs to Garmin, and verifies. Call it directly whenever the athlete asks for a change. Required parameter: `workout_date` (YYYY-MM-DD). Optional: `discipline`, `workout_type`, `target_duration`, `target_distance`, `description`, `workout_steps`, `reason`.
+- If the tool returns `"success"`: tell the athlete "Done — updated and synced to Garmin."
+- If the tool returns `"synced_unverified"`: tell the athlete "Change saved locally and sent to Garmin. Sync verification pending — check your watch in a few minutes."
+- If the tool returns `"failed"`: tell the athlete "Change saved locally but Garmin sync failed: [reason]. I'll retry on the next plan sync."
+- NEVER describe a workout change to the user without calling `apply_workout_change` first. Always execute, then report the result.
+Use `modify_workout` only for simple read-only lookups of a workout's current state. It does NOT apply changes.
+Use `build_assistant_plan` ONLY for full plan regeneration, never for single-workout changes.
+When giving or revising workout prescriptions, always include a concrete session structure (warm-up, main set, cooldown) with measurable targets:
+- Run: miles and pace ranges (per mile)
+- Swim: yards and pace targets (per 100yd)
+- Bike: power/zone targets and cadence
+- Strength: specific sets/reps/exercises with short cues
 
 {athlete_context}
 
@@ -86,9 +99,7 @@ def determine_phase(race_date: date) -> str:
         return "base"
 
 
-def compute_load_ratio(
-    acute: float | None, chronic: float | None
-) -> float | None:
+def compute_load_ratio(acute: float | None, chronic: float | None) -> float | None:
     """Compute acute:chronic training load ratio."""
     if acute is None or chronic is None or chronic == 0:
         return None
@@ -258,6 +269,6 @@ def build_system_prompt(
         athlete_context=athlete_context,
         athlete_profile=profile_text,
         view_context=view_text,
-        today=date.today().isoformat(),
+        today=date.today().strftime("%A, %Y-%m-%d"),
         race_context=race_text,
     )

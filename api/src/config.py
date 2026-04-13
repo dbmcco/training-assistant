@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     garmin_writeback_enabled: bool = True
     garmin_writeback_repo: str = ""
     garmin_writeback_python: str = ""
+    garmin_writeback_verify_enabled: bool = True
+    garmin_writeback_verify_delay_seconds: int = 3
+    garmin_writeback_verify_timeout_seconds: int = 10
     garmin_refresh_enabled: bool = True
     garmin_refresh_repo: str = ""
     garmin_refresh_python: str = ""
