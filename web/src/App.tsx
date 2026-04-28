@@ -26,6 +26,7 @@ function App() {
             <Route path="/" element={<Dashboard />} />
             <Route path="/analysis" element={<Analysis />} />
             <Route path="/plan" element={<Plan />} />
+            <Route path="/board" element={<Navigate to="/" replace />} />
             <Route path="/races" element={<Navigate to="/plan" replace />} />
             <Route path="/profile" element={<Profile />} />
           </Routes>
