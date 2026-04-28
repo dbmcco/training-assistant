@@ -13,7 +13,7 @@ export default function RaceCountdown({ races }: RaceCountdownProps) {
 
       <div className="space-y-3">
         {races.map((race) => {
-          const raceDate = new Date(race.date)
+          const raceDate = new Date(`${race.date}T00:00:00`)
           const dateStr = raceDate.toLocaleDateString('en-US', {
             month: 'short',
             day: 'numeric',

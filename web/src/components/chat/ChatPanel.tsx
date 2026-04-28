@@ -159,6 +159,7 @@ export default function ChatPanel({ isOpen, onToggle }: ChatPanelProps) {
     queryFn: fetchDashboardToday,
     staleTime: 60_000,
   })
+  const dashboardDate = todayQuery.data?.date
 
   const conversationSeedQuery = useQuery({
     queryKey: ['chat', 'latestConversation'],
@@ -191,8 +192,17 @@ export default function ChatPanel({ isOpen, onToggle }: ChatPanelProps) {
   })
 
   const recentRecommendationsQuery = useQuery({
-    queryKey: ['recommendations', 'recent'],
-    queryFn: () => fetchRecommendations({ limit: 10 }),
+    queryKey: ['recommendations', 'pending', dashboardDate],
+    queryFn: async () => {
+      if (!dashboardDate) {
+        return []
+      }
+      const recommendations = await fetchRecommendations({ status: 'pending', limit: 25 })
+      return recommendations.filter(
+        (recommendation) =>
+          recommendation.workout_date && recommendation.workout_date >= dashboardDate,
+      )
+    },
     staleTime: 30_000,
     refetchInterval: 60_000,
   })
@@ -326,7 +336,7 @@ export default function ChatPanel({ isOpen, onToggle }: ChatPanelProps) {
       queryClient.invalidateQueries({ queryKey: ['dashboard', 'today'] })
       queryClient.invalidateQueries({ queryKey: ['planWorkouts'] })
       queryClient.invalidateQueries({ queryKey: ['planAdherence'] })
-      queryClient.invalidateQueries({ queryKey: ['recommendations', 'recent'] })
+      queryClient.invalidateQueries({ queryKey: ['recommendations'] })
     },
     onSettled: () => setDecisionBusyId(null),
   })
@@ -446,7 +456,7 @@ export default function ChatPanel({ isOpen, onToggle }: ChatPanelProps) {
                 return updated
               })
             }
-            queryClient.invalidateQueries({ queryKey: ['recommendations', 'recent'] })
+            queryClient.invalidateQueries({ queryKey: ['recommendations'] })
             // Do not wait for socket close; once done is received, unlock input.
             return
           }
