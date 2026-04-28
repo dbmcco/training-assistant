@@ -96,6 +96,57 @@ async def test_approve_recommendation_refreshes_calendar_after_successful_writeb
 
 
 @pytest.mark.asyncio
+async def test_decide_recommendation_is_idempotent_after_matching_decision():
+    rec = RecommendationChange(
+        id=uuid4(),
+        status="approved",
+        workout_date=date.today(),
+        recommendation_text="Already approved.",
+        garmin_sync_status="synced_unverified",
+        garmin_sync_result={"status": "success"},
+    )
+    db = AsyncMock()
+
+    with patch(
+        "src.services.recommendations.write_recommendation_change",
+        AsyncMock(),
+    ) as writeback_mock:
+        updated = await decide_recommendation(
+            db,
+            recommendation=rec,
+            decision="approved",
+            note=None,
+        )
+
+    assert updated is rec
+    assert updated.status == "approved"
+    assert updated.garmin_sync_status == "synced_unverified"
+    writeback_mock.assert_not_awaited()
+    db.flush.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_decide_recommendation_rejects_conflicting_repeat_decision():
+    rec = RecommendationChange(
+        id=uuid4(),
+        status="approved",
+        workout_date=date.today(),
+        recommendation_text="Already approved.",
+    )
+    db = AsyncMock()
+
+    with pytest.raises(ValueError, match="already approved"):
+        await decide_recommendation(
+            db,
+            recommendation=rec,
+            decision="rejected",
+            note="Changed my mind",
+        )
+
+    db.flush.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_approve_recommendation_skips_calendar_refresh_when_writeback_fails():
     rec = RecommendationChange(
         id=uuid4(),

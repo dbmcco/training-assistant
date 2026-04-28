@@ -435,6 +435,14 @@ async def decide_recommendation(
     if decision not in ALLOWED_DECISIONS:
         raise ValueError(f"Invalid decision: {decision}")
 
+    current_status = (recommendation.status or "pending").strip().lower()
+    if current_status != "pending":
+        if current_status == decision:
+            return recommendation
+        raise ValueError(
+            f"Recommendation already {current_status}; cannot change to {decision}"
+        )
+
     now = datetime.now(timezone.utc)
     recommendation.status = decision
     recommendation.decision_notes = note

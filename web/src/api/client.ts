@@ -22,6 +22,7 @@ import type {
 const BASE = '/api/v1'
 const REQUEST_TIMEOUT_MS = 12_000
 const CHAT_STREAM_IDLE_TIMEOUT_MS = 45_000
+const RECOMMENDATION_DECISION_TIMEOUT_MS = 90_000
 
 async function fetchWithTimeout(
   input: RequestInfo | URL,
@@ -292,7 +293,7 @@ export async function submitRecommendationDecision(
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
-  })
+  }, RECOMMENDATION_DECISION_TIMEOUT_MS)
   if (!res.ok) throw new Error(`Recommendation decision failed: ${res.status}`)
   return res.json()
 }
