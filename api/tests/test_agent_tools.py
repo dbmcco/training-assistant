@@ -1,4 +1,6 @@
 import pytest
+import json
+from datetime import date, datetime, timezone
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
@@ -8,7 +10,7 @@ from src.agent.tools import (
     _normalize_discipline_filter,
     execute_tool,
 )
-from src.db.models import GarminActivity
+from src.db.models import AssistantPlanEntry, GarminActivity, PlannedWorkout
 
 
 EXPECTED_TOOL_NAMES = [
@@ -498,6 +500,114 @@ async def test_apply_workout_change_creates_new_workout(monkeypatch):
     assert parsed["status"] in ("success", "saved_local", "synced_unverified")
     assert parsed["workout_date"] == "2026-04-20"
     assert parsed.get("created_new") is True
+
+
+@pytest.mark.asyncio
+async def test_apply_workout_change_assistant_created_workout_is_visible(monkeypatch):
+    fake_execute, fake_flush, fake_commit, fake_refresh = (
+        _make_apply_workout_change_patches(
+            monkeypatch,
+            writeback_enabled=False,
+            workout=None,
+        )
+    )
+    monkeypatch.setattr("src.agent.tools.is_assistant_owned_mode", lambda: True)
+
+    added = []
+    fake_db = AsyncMock()
+    fake_db.add = added.append
+    fake_db.execute = fake_execute
+    fake_db.flush = fake_flush
+    fake_db.commit = fake_commit
+    fake_db.refresh = fake_refresh
+    fake_db.rollback = AsyncMock()
+
+    result = await execute_tool(
+        "apply_workout_change",
+        {
+            "workout_date": "2026-05-04",
+            "discipline": "rest",
+            "workout_type": "rest",
+            "target_duration": 0,
+            "description": "Full rest after Mount Archer.",
+        },
+        fake_db,
+    )
+
+    parsed = json.loads(result)
+    assert parsed.get("created_new") is True
+    assert any(isinstance(obj, PlannedWorkout) for obj in added)
+    assert any(isinstance(obj, AssistantPlanEntry) for obj in added)
+
+
+@pytest.mark.asyncio
+async def test_apply_workout_change_can_change_existing_workout_discipline(
+    monkeypatch,
+):
+    existing = PlannedWorkout(
+        id=uuid4(),
+        date=date(2026, 5, 3),
+        discipline="strength",
+        workout_type="mobility_strength",
+        target_duration=30,
+        description="Mobility and activation work",
+        status="upcoming",
+        created_at=datetime.now(timezone.utc),
+    )
+
+    monkeypatch.setattr("src.agent.tools.is_assistant_owned_mode", lambda: True)
+    monkeypatch.setattr("src.config.settings.garmin_writeback_enabled", False)
+
+    async def fake_acquire_lock(db, workout_id):
+        return True
+
+    async def fake_release_lock(db, workout_id):
+        return True
+
+    monkeypatch.setattr("src.agent.tools.acquire_workout_lock", fake_acquire_lock)
+    monkeypatch.setattr("src.agent.tools.release_workout_lock", fake_release_lock)
+
+    class FakeQueryResult:
+        def __init__(self, value):
+            self.value = value
+
+        def scalar_one_or_none(self):
+            return self.value
+
+    execute_results = [None, existing]
+
+    async def fake_execute(stmt):
+        return FakeQueryResult(execute_results.pop(0))
+
+    added = []
+    fake_db = AsyncMock()
+    fake_db.add = added.append
+    fake_db.execute = fake_execute
+    fake_db.flush = AsyncMock()
+    fake_db.commit = AsyncMock()
+    fake_db.refresh = AsyncMock()
+    fake_db.rollback = AsyncMock()
+
+    result = await execute_tool(
+        "apply_workout_change",
+        {
+            "workout_date": "2026-05-03",
+            "discipline": "run",
+            "workout_type": "race",
+            "target_duration": 105,
+            "description": "Mount Archer Trail Race.",
+        },
+        fake_db,
+    )
+
+    parsed = json.loads(result)
+    assert parsed["status"] == "saved_local"
+    assert parsed.get("created_new") is None
+    assert existing.discipline == "run"
+    assert existing.workout_type == "race"
+    assert existing.target_duration == 105
+    assert existing.description.startswith("Mount Archer Trail Race.")
+    assert added == []
 
 
 @pytest.mark.asyncio

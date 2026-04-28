@@ -159,9 +159,9 @@ export default function ChatPanel({ isOpen, onToggle }: ChatPanelProps) {
     staleTime: 60_000,
   })
 
-  const pendingRecommendationsQuery = useQuery({
-    queryKey: ['recommendations', 'pending'],
-    queryFn: () => fetchRecommendations({ status: 'pending', limit: 5 }),
+  const recentRecommendationsQuery = useQuery({
+    queryKey: ['recommendations', 'recent'],
+    queryFn: () => fetchRecommendations({ limit: 10 }),
     staleTime: 30_000,
     refetchInterval: 60_000,
   })
@@ -246,8 +246,8 @@ export default function ChatPanel({ isOpen, onToggle }: ChatPanelProps) {
   }
 
   useEffect(() => {
-    const pending = pendingRecommendationsQuery.data
-    if (!pending || pending.length === 0) {
+    const recommendations = recentRecommendationsQuery.data
+    if (!recommendations || recommendations.length === 0) {
       return
     }
 
@@ -255,7 +255,7 @@ export default function ChatPanel({ isOpen, onToggle }: ChatPanelProps) {
       const existingRecommendationIds = new Set(
         prev.map((msg) => msg.recommendationChange?.id).filter((id): id is string => Boolean(id)),
       )
-      const additions = pending
+      const additions = recommendations
         .filter((rec) => !existingRecommendationIds.has(rec.id))
         .reverse()
         .map((rec) => ({
@@ -273,7 +273,7 @@ export default function ChatPanel({ isOpen, onToggle }: ChatPanelProps) {
       }
       return [...prev, ...additions]
     })
-  }, [pendingRecommendationsQuery.data])
+  }, [recentRecommendationsQuery.data])
 
   const briefingMutation = useMutation({
     mutationFn: generateBriefing,
@@ -316,7 +316,7 @@ export default function ChatPanel({ isOpen, onToggle }: ChatPanelProps) {
       queryClient.invalidateQueries({ queryKey: ['dashboard', 'today'] })
       queryClient.invalidateQueries({ queryKey: ['planWorkouts'] })
       queryClient.invalidateQueries({ queryKey: ['planAdherence'] })
-      queryClient.invalidateQueries({ queryKey: ['recommendations', 'pending'] })
+      queryClient.invalidateQueries({ queryKey: ['recommendations', 'recent'] })
     },
     onSettled: () => setDecisionBusyId(null),
   })

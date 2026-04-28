@@ -1423,28 +1423,30 @@ async def _apply_workout_change(
         proposed["workout_steps"] = sanitized_steps
     proposed = _hydrate_proposed_workout_details(proposed)
 
-    query = (
-        select(PlannedWorkout)
-        .where(
+    async def _find_workout(*, match_discipline: bool) -> PlannedWorkout | None:
+        query = select(PlannedWorkout).where(
             and_(
                 PlannedWorkout.date == parsed_date,
                 PlannedWorkout.status.in_(["upcoming", "modified"]),
             )
         )
-        .order_by(PlannedWorkout.created_at.desc())
-        .limit(1)
-    )
-    if proposed.get("discipline"):
-        query = query.where(
-            PlannedWorkout.discipline.ilike(f"%{proposed['discipline']}%")
+        if match_discipline and proposed.get("discipline"):
+            query = query.where(
+                PlannedWorkout.discipline.ilike(f"%{proposed['discipline']}%")
+            )
+        if is_assistant_owned_mode():
+            query = query.join(
+                AssistantPlanEntry,
+                AssistantPlanEntry.planned_workout_id == PlannedWorkout.id,
+            )
+        result = await db.execute(
+            query.order_by(PlannedWorkout.created_at.desc()).limit(1)
         )
-    if is_assistant_owned_mode():
-        query = query.join(
-            AssistantPlanEntry,
-            AssistantPlanEntry.planned_workout_id == PlannedWorkout.id,
-        )
-    result = await db.execute(query)
-    workout = result.scalar_one_or_none()
+        return result.scalar_one_or_none()
+
+    workout = await _find_workout(match_discipline=True)
+    if workout is None and proposed.get("discipline"):
+        workout = await _find_workout(match_discipline=False)
 
     created_new = False
     if workout is None:
@@ -1463,6 +1465,17 @@ async def _apply_workout_change(
         db.add(workout)
         await db.flush()
         created_new = True
+        if is_assistant_owned_mode():
+            now = datetime.now(timezone.utc)
+            db.add(
+                AssistantPlanEntry(
+                    planned_workout_id=workout.id,
+                    garmin_sync_status="pending",
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+            await db.flush()
 
     locked = False
     try:
