@@ -5,6 +5,8 @@
 
 # Workspace helper artifacts
 .amplifier/
+.claude/
+.opencode/
 .workgraph/
 
 # Python
@@ -36,4 +38,3 @@ dist/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-
