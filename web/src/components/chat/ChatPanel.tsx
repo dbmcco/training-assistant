@@ -17,6 +17,7 @@ import type {
   Briefing,
   ChatMessage as ApiChatMessage,
   ConversationDetail,
+  RecommendationChange,
   RecommendationDecision,
 } from '../../api/types'
 
@@ -108,6 +109,36 @@ function apiMessageToUi(message: ApiChatMessage): Message {
   }
 }
 
+function appendRecommendationMessages(
+  messages: Message[],
+  recommendations: RecommendationChange[],
+): Message[] {
+  if (recommendations.length === 0) {
+    return messages
+  }
+
+  const existingRecommendationIds = new Set(
+    messages.map((msg) => msg.recommendationChange?.id).filter((id): id is string => Boolean(id)),
+  )
+  const additions = recommendations
+    .filter((rec) => !existingRecommendationIds.has(rec.id))
+    .reverse()
+    .map((rec) => ({
+      id: `recommendation-${rec.id}`,
+      role: 'assistant' as const,
+      content:
+        rec.recommendation_text ||
+        'Proposed plan change is ready for review. Approve to apply and sync.',
+      toolCalls: [],
+      recommendationChange: rec,
+    }))
+
+  if (additions.length === 0) {
+    return messages
+  }
+  return [...messages, ...additions]
+}
+
 export default function ChatPanel({ isOpen, onToggle }: ChatPanelProps) {
   const [messages, setMessages] = useState<Message[]>([])
   const [isStreaming, setIsStreaming] = useState(false)
@@ -175,7 +206,7 @@ export default function ChatPanel({ isOpen, onToggle }: ChatPanelProps) {
       const conversation = conversationSeedQuery.data
       if (conversation?.id) {
         const hydrated = (conversation.messages ?? []).map(apiMessageToUi)
-        setMessages(hydrated)
+        setMessages(appendRecommendationMessages(hydrated, recentRecommendationsQuery.data ?? []))
         setConversationId(conversation.id)
         setHistoryHasMore(Boolean(conversation.history?.has_more))
         setHistoryCursor(conversation.history?.next_before ?? null)
@@ -183,7 +214,7 @@ export default function ChatPanel({ isOpen, onToggle }: ChatPanelProps) {
       }
       hasHydratedConversationRef.current = true
     }
-  }, [conversationSeedQuery.data, conversationSeedQuery.isSuccess])
+  }, [conversationSeedQuery.data, conversationSeedQuery.isSuccess, recentRecommendationsQuery.data])
 
   useEffect(() => {
     if (!conversationId || typeof window === 'undefined') {
@@ -251,28 +282,7 @@ export default function ChatPanel({ isOpen, onToggle }: ChatPanelProps) {
       return
     }
 
-    setMessages((prev) => {
-      const existingRecommendationIds = new Set(
-        prev.map((msg) => msg.recommendationChange?.id).filter((id): id is string => Boolean(id)),
-      )
-      const additions = recommendations
-        .filter((rec) => !existingRecommendationIds.has(rec.id))
-        .reverse()
-        .map((rec) => ({
-          id: `recommendation-${rec.id}`,
-          role: 'assistant' as const,
-          content:
-            rec.recommendation_text ||
-            'Proposed plan change is ready for review. Approve to apply and sync.',
-          toolCalls: [],
-          recommendationChange: rec,
-        }))
-
-      if (additions.length === 0) {
-        return prev
-      }
-      return [...prev, ...additions]
-    })
+    setMessages((prev) => appendRecommendationMessages(prev, recommendations))
   }, [recentRecommendationsQuery.data])
 
   const briefingMutation = useMutation({
