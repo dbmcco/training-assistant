@@ -29,6 +29,7 @@ interface ChatPanelProps {
 const CONVERSATION_STORAGE_KEY = 'training-assistant-conversation-id'
 const DEFAULT_VISIBLE_MESSAGES = 12
 const CONVERSATION_FETCH_LIMIT = 40
+const RECENT_DECISION_CONTEXT_MS = 15 * 60 * 1000
 
 function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
@@ -78,6 +79,7 @@ function briefingToMessage(briefing: Briefing): Message {
     id: `briefing-${Date.now()}`,
     role: 'assistant',
     content: lines.join('\n\n').trim(),
+    createdAt: new Date().toISOString(),
     toolCalls: [],
     recommendationChange: briefing.recommendation_change ?? null,
   }
@@ -104,12 +106,64 @@ function apiMessageToUi(message: ApiChatMessage): Message {
     id: message.id,
     role: message.role,
     content: message.content,
+    createdAt: message.created_at,
     toolCalls: parsedToolCalls,
     recommendationChange: null,
   }
 }
 
-function appendRecommendationMessages(
+function recommendationTimelineDate(recommendation: RecommendationChange): string | null {
+  if (recommendation.status === 'pending') {
+    return recommendation.created_at ?? recommendation.decided_at ?? recommendation.applied_at ?? null
+  }
+  return recommendation.applied_at ?? recommendation.decided_at ?? recommendation.created_at ?? null
+}
+
+function latestUserMessageTime(messages: Message[]): number | null {
+  const times = messages
+    .filter((message) => message.role === 'user' && message.createdAt)
+    .map((message) => Date.parse(message.createdAt as string))
+    .filter((time) => Number.isFinite(time))
+  if (times.length === 0) {
+    return null
+  }
+  return Math.max(...times)
+}
+
+function latestRecommendationActivityTime(recommendation: RecommendationChange): number | null {
+  const times = [recommendation.created_at, recommendation.decided_at, recommendation.applied_at]
+    .map((value) => (value ? Date.parse(value) : Number.NaN))
+    .filter((time) => Number.isFinite(time))
+  if (times.length === 0) {
+    return null
+  }
+  return Math.max(...times)
+}
+
+function belongsInCurrentTimeline(
+  recommendation: RecommendationChange,
+  messages: Message[],
+): boolean {
+  const latestUserTime = latestUserMessageTime(messages)
+  if (latestUserTime === null) {
+    return true
+  }
+
+  const createdTime = recommendation.created_at
+    ? Date.parse(recommendation.created_at)
+    : Number.NaN
+  if (recommendation.status === 'pending') {
+    return Number.isFinite(createdTime) && createdTime >= latestUserTime
+  }
+
+  const activityTime = latestRecommendationActivityTime(recommendation)
+  return (
+    activityTime !== null &&
+    activityTime >= latestUserTime - RECENT_DECISION_CONTEXT_MS
+  )
+}
+
+function mergeRecommendationMessages(
   messages: Message[],
   recommendations: RecommendationChange[],
 ): Message[] {
@@ -120,23 +174,47 @@ function appendRecommendationMessages(
   const existingRecommendationIds = new Set(
     messages.map((msg) => msg.recommendationChange?.id).filter((id): id is string => Boolean(id)),
   )
+  const updatedMessages = messages.map((msg) => {
+    const existingId = msg.recommendationChange?.id
+    if (!existingId) {
+      return msg
+    }
+    const latestRecommendation = recommendations.find((rec) => rec.id === existingId)
+    return latestRecommendation ? { ...msg, recommendationChange: latestRecommendation } : msg
+  })
   const additions = recommendations
     .filter((rec) => !existingRecommendationIds.has(rec.id))
-    .reverse()
+    .filter((rec) => belongsInCurrentTimeline(rec, messages))
     .map((rec) => ({
       id: `recommendation-${rec.id}`,
       role: 'assistant' as const,
       content:
         rec.recommendation_text ||
         'Proposed plan change is ready for review. Approve to apply and sync.',
+      createdAt: recommendationTimelineDate(rec),
       toolCalls: [],
       recommendationChange: rec,
     }))
 
   if (additions.length === 0) {
-    return messages
+    return updatedMessages
   }
-  return [...messages, ...additions]
+  return [...updatedMessages, ...additions]
+    .map((message, index) => ({ message, index }))
+    .sort((a, b) => {
+      const aTime = a.message.createdAt ? Date.parse(a.message.createdAt) : Number.NaN
+      const bTime = b.message.createdAt ? Date.parse(b.message.createdAt) : Number.NaN
+      const aValid = Number.isFinite(aTime)
+      const bValid = Number.isFinite(bTime)
+      if (aValid && bValid && aTime !== bTime) {
+        return aTime - bTime
+      }
+      if (aValid !== bValid) {
+        return aValid ? -1 : 1
+      }
+      return a.index - b.index
+    })
+    .map(({ message }) => message)
 }
 
 export default function ChatPanel({ isOpen, onToggle }: ChatPanelProps) {
@@ -197,11 +275,18 @@ export default function ChatPanel({ isOpen, onToggle }: ChatPanelProps) {
       if (!dashboardDate) {
         return []
       }
-      const recommendations = await fetchRecommendations({ status: 'pending', limit: 25 })
-      return recommendations.filter(
-        (recommendation) =>
-          recommendation.workout_date && recommendation.workout_date >= dashboardDate,
-      )
+      const recommendations = await fetchRecommendations({ limit: 25 })
+      return recommendations.filter((recommendation) => {
+        if (!recommendation.workout_date || recommendation.workout_date < dashboardDate) {
+          return false
+        }
+        return (
+          recommendation.status === 'pending' ||
+          recommendation.created_at?.slice(0, 10) === dashboardDate ||
+          recommendation.decided_at?.slice(0, 10) === dashboardDate ||
+          recommendation.applied_at?.slice(0, 10) === dashboardDate
+        )
+      })
     },
     staleTime: 30_000,
     refetchInterval: 60_000,
@@ -216,11 +301,12 @@ export default function ChatPanel({ isOpen, onToggle }: ChatPanelProps) {
       const conversation = conversationSeedQuery.data
       if (conversation?.id) {
         const hydrated = (conversation.messages ?? []).map(apiMessageToUi)
-        setMessages(appendRecommendationMessages(hydrated, recentRecommendationsQuery.data ?? []))
+        setMessages(mergeRecommendationMessages(hydrated, recentRecommendationsQuery.data ?? []))
         setConversationId(conversation.id)
         setHistoryHasMore(Boolean(conversation.history?.has_more))
         setHistoryCursor(conversation.history?.next_before ?? null)
-        hasSeededBriefingRef.current = hydrated.some((m) => m.id.startsWith('briefing-'))
+        hasSeededBriefingRef.current =
+          hydrated.length > 0 || hydrated.some((m) => m.id.startsWith('briefing-'))
       }
       hasHydratedConversationRef.current = true
     }
@@ -292,7 +378,7 @@ export default function ChatPanel({ isOpen, onToggle }: ChatPanelProps) {
       return
     }
 
-    setMessages((prev) => appendRecommendationMessages(prev, recommendations))
+    setMessages((prev) => mergeRecommendationMessages(prev, recommendations))
   }, [recentRecommendationsQuery.data])
 
   const briefingMutation = useMutation({
@@ -361,12 +447,14 @@ export default function ChatPanel({ isOpen, onToggle }: ChatPanelProps) {
       id: generateId(),
       role: 'user',
       content,
+      createdAt: new Date().toISOString(),
     }
 
     const assistantMessage: Message = {
       id: generateId(),
       role: 'assistant',
       content: '',
+      createdAt: new Date().toISOString(),
       toolCalls: [],
     }
 

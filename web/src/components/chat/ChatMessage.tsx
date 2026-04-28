@@ -13,6 +13,7 @@ export interface Message {
   id: string
   role: 'user' | 'assistant'
   content: string
+  createdAt?: string | null
   toolCalls?: ToolCallInfo[]
   recommendationChange?: RecommendationChange | null
 }
