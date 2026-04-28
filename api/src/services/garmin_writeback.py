@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import subprocess
 import sys
 import time
@@ -35,6 +36,14 @@ def _resolve_repo_and_python() -> tuple[Path, Path]:
         else repo / ".venv" / "bin" / "python3"
     )
     return repo, python_bin
+
+
+def _garmin_subprocess_env() -> dict[str, str]:
+    env = os.environ.copy()
+    sync_database_url = env.get("DATABASE_URL_SYNC")
+    if sync_database_url:
+        env["DATABASE_URL"] = sync_database_url
+    return env
 
 
 def _run_writeback(payload: dict[str, Any]) -> dict[str, Any]:
@@ -68,6 +77,7 @@ def _run_writeback(payload: dict[str, Any]) -> dict[str, Any]:
         text=True,
         timeout=90,
         check=False,
+        env=_garmin_subprocess_env(),
     )
 
     stdout = proc.stdout.strip()
@@ -157,7 +167,7 @@ def verify_writeback(
 
     delay = settings.garmin_writeback_verify_delay_seconds
     if delay > 0:
-        time.sleep(delay)
+        time.sleep(min(delay, 3))
 
     cmd = [
         str(python_bin),
@@ -174,6 +184,7 @@ def verify_writeback(
             text=True,
             timeout=timeout,
             check=False,
+            env=_garmin_subprocess_env(),
         )
     except subprocess.TimeoutExpired:
         return {
@@ -267,8 +278,72 @@ def _run_writeback_with_verify(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 async def write_recommendation_change(payload: dict[str, Any]) -> dict[str, Any]:
-    """Async wrapper around the external Garmin writeback command with post-writeback verification."""
-    return await asyncio.to_thread(_run_writeback_with_verify, payload)
+    """Async wrapper around the external Garmin writeback command.
+
+    Runs writeback immediately. If verification is enabled, spawns a
+    background verification task so the caller is not blocked by the
+    verify delay + subprocess.  The initial result carries
+    verification_status='synced_unverified'; the background task
+    updates the returned dict in-place with the real verification
+    outcome once it completes (callers that persist the result to DB
+    should re-read or accept the initial status).
+    """
+    writeback_result = await asyncio.to_thread(_run_writeback, payload)
+
+    if writeback_result.get("status") in ("failed", "skipped"):
+        writeback_result["verification_status"] = writeback_result["status"]
+        return writeback_result
+
+    if not settings.garmin_writeback_verify_enabled:
+        status = (
+            "success"
+            if writeback_result.get("status") == "success"
+            else "synced_unverified"
+        )
+        writeback_result["verification_status"] = status
+        return writeback_result
+
+    workout_date = str(payload.get("workout_date") or "")
+    discipline = str(payload.get("discipline") or "")
+    workout_type = str(payload.get("workout_type") or "")
+
+    if not workout_date or not discipline:
+        writeback_result["verification_status"] = "synced_unverified"
+        writeback_result["verification_error"] = (
+            "missing_workout_date_or_discipline_for_verify"
+        )
+        return writeback_result
+
+    writeback_result["verification_status"] = "synced_unverified"
+
+    async def _bg_verify():
+        try:
+            await asyncio.sleep(min(settings.garmin_writeback_verify_delay_seconds, 3))
+            verification = await asyncio.to_thread(
+                verify_writeback,
+                workout_date=workout_date,
+                discipline=discipline,
+                workout_type=workout_type,
+                timeout_seconds=min(
+                    settings.garmin_writeback_verify_timeout_seconds, 8
+                ),
+            )
+            if verification.get("verified"):
+                writeback_result["verification_status"] = "success"
+                writeback_result["verification_details"] = verification.get(
+                    "match_details"
+                )
+            else:
+                writeback_result["verification_error"] = verification.get("error")
+        except Exception as exc:
+            writeback_result["verification_error"] = f"verify_exception: {exc}"
+
+    try:
+        asyncio.get_running_loop().create_task(_bg_verify())
+    except RuntimeError:
+        pass
+
+    return writeback_result
 
 
 def fallback_writeback_payload(

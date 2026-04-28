@@ -5,6 +5,7 @@ import json
 from src.config import settings
 from src.services.garmin_writeback import (
     _discipline_matches,
+    _run_writeback,
     _workout_matches,
     _run_writeback_with_verify,
     verify_writeback,
@@ -368,3 +369,41 @@ def test_no_default_success_status(monkeypatch):
         )
 
     assert result.get("status") is None
+
+
+def test_run_writeback_passes_sync_database_url_to_subprocess(monkeypatch):
+    monkeypatch.setattr(settings, "garmin_writeback_enabled", True)
+    monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://app")
+    monkeypatch.setenv("DATABASE_URL_SYNC", "postgresql://sync")
+
+    repo = Path("/tmp/fake_garmin")
+    python = repo / ".venv" / "bin" / "python3"
+    captured = {}
+
+    mock_proc = MagicMock()
+    mock_proc.returncode = 0
+    mock_proc.stdout = '{"status": "success", "workout_id": "123"}'
+    mock_proc.stderr = ""
+
+    def fake_run(*args, **kwargs):
+        captured["env"] = kwargs.get("env")
+        return mock_proc
+
+    with (
+        patch(
+            "src.services.garmin_writeback._resolve_repo_and_python",
+            return_value=(repo, python),
+        ),
+        patch("src.services.garmin_writeback.subprocess.run", side_effect=fake_run),
+        patch("pathlib.Path.exists", return_value=True),
+    ):
+        result = _run_writeback(
+            {
+                "workout_date": "2026-04-13",
+                "discipline": "running",
+                "workout_type": "easy",
+            }
+        )
+
+    assert result["status"] == "success"
+    assert captured["env"]["DATABASE_URL"] == "postgresql://sync"
