@@ -1,6 +1,6 @@
 import pytest
 import json
-from datetime import date, datetime, timezone
+from datetime import date
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
@@ -11,9 +11,7 @@ from src.agent.tools import (
     execute_tool,
 )
 from src.db.models import (
-    AssistantPlanEntry,
     GarminActivity,
-    PlannedWorkout,
     RecommendationChange,
 )
 
@@ -464,63 +462,6 @@ async def test_execute_refresh_garmin_data(monkeypatch):
     assert "plan_changes_detected: 1" in result
 
 
-def _make_apply_workout_change_patches(
-    monkeypatch, *, writeback_enabled=True, workout=None, lock_succeeds=True
-):
-    import json as _json
-    from datetime import date as _date
-    from uuid import uuid4 as _uuid4
-
-    monkeypatch.setattr("src.agent.tools.is_assistant_owned_mode", lambda: False)
-
-    async def fake_acquire_lock(db, workout_id):
-        return lock_succeeds
-
-    async def fake_release_lock(db, workout_id):
-        return True
-
-    monkeypatch.setattr("src.agent.tools.acquire_workout_lock", fake_acquire_lock)
-    monkeypatch.setattr("src.agent.tools.release_workout_lock", fake_release_lock)
-
-    class FakeQueryResult:
-        def scalar_one_or_none(self):
-            return workout
-
-    class FakeExecute:
-        def __await__(self):
-            return FakeQueryResult().__await__()
-
-    async def fake_execute(stmt):
-        return FakeQueryResult()
-
-    async def fake_flush():
-        pass
-
-    async def fake_commit():
-        pass
-
-    async def fake_refresh(obj):
-        pass
-
-    import src.config as _cfg
-
-    monkeypatch.setattr(_cfg.settings, "garmin_writeback_enabled", writeback_enabled)
-    monkeypatch.setattr(_cfg.settings, "garmin_writeback_verify_enabled", False)
-
-    async def fake_writeback(payload):
-        return {
-            "status": "success",
-            "verification_status": "success",
-            "workout_id": "gw-123",
-        }
-
-    monkeypatch.setattr(
-        "src.services.garmin_writeback.write_recommendation_change", fake_writeback
-    )
-
-    return fake_execute, fake_flush, fake_commit, fake_refresh
-
-
 @pytest.mark.asyncio
 async def test_apply_workout_change_invalid_date():
     result = await execute_tool(
@@ -542,61 +483,115 @@ async def test_apply_workout_change_missing_date():
 
 
 @pytest.mark.asyncio
-async def test_apply_workout_change_creates_new_workout(monkeypatch):
-    fake_execute, fake_flush, fake_commit, fake_refresh = (
-        _make_apply_workout_change_patches(
-            monkeypatch,
-            workout=None,
-        )
+async def test_apply_workout_change_uses_recommendation_approval_pipeline(monkeypatch):
+    rec = RecommendationChange(
+        id=uuid4(),
+        status="pending",
+        workout_date=date(2026, 5, 5),
+        recommendation_text="Directly approved change: Recovery swim.",
+        proposed_workout={
+            "workout_date": "2026-05-05",
+            "discipline": "swim",
+            "workout_type": "recovery_swim",
+            "target_duration": 40,
+        },
+        garmin_sync_status="pending",
     )
+    calls = []
+
+    async def fake_create_intent(db, *, recommendation_text, proposed_workout, source):
+        calls.append(("create", recommendation_text, proposed_workout, source))
+        return rec
+
+    async def fake_decide(db, *, recommendation, decision, note, requested_changes=None):
+        calls.append(("decide", recommendation.id, decision, note, requested_changes))
+        recommendation.status = "approved"
+        recommendation.garmin_sync_status = "success"
+        recommendation.garmin_sync_result = {"status": "success", "workout_id": "gw-123"}
+        recommendation.planned_workout_id = uuid4()
+        return recommendation
 
     fake_db = AsyncMock()
-    fake_db.execute = fake_execute
-    fake_db.flush = fake_flush
-    fake_db.commit = fake_commit
-    fake_db.refresh = fake_refresh
+    fake_db.commit = AsyncMock()
+    fake_db.refresh = AsyncMock()
     fake_db.rollback = AsyncMock()
-    fake_db.no_autoflush = _no_autoflush_ctx()
+
+    monkeypatch.setattr(
+        "src.agent.tools.create_coach_recommendation_intent",
+        fake_create_intent,
+    )
+    monkeypatch.setattr("src.agent.tools.decide_recommendation", fake_decide)
 
     result = await execute_tool(
         "apply_workout_change",
         {
-            "workout_date": "2026-04-20",
-            "discipline": "run",
-            "workout_type": "endurance_run",
-            "target_duration": 60,
-            "reason": "Test creation",
+            "workout_date": "2026-05-05",
+            "discipline": "swim",
+            "workout_type": "recovery_swim",
+            "target_duration": 40,
+            "description": "Easy post-race swim.",
+            "reason": "Athlete explicitly approved this change.",
         },
         fake_db,
     )
 
-    import json
-
     parsed = json.loads(result)
-    assert parsed["status"] in ("success", "saved_local", "synced_unverified")
-    assert parsed["workout_date"] == "2026-04-20"
-    assert parsed.get("created_new") is True
+    assert parsed["status"] == "success"
+    assert parsed["intent_id"] == str(rec.id)
+    assert parsed["workout_date"] == "2026-05-05"
+    assert parsed["garmin_sync"]["status"] == "success"
+    assert parsed["pipeline"] == "recommendation_approval"
+    assert calls[0][0] == "create"
+    assert calls[0][3] == "coach_direct"
+    assert calls[1] == (
+        "decide",
+        rec.id,
+        "approved",
+        "Athlete explicitly approved this change.",
+        None,
+    )
+    fake_db.commit.assert_awaited_once()
 
 
 @pytest.mark.asyncio
-async def test_apply_workout_change_assistant_created_workout_is_visible(monkeypatch):
-    fake_execute, fake_flush, fake_commit, fake_refresh = (
-        _make_apply_workout_change_patches(
-            monkeypatch,
-            writeback_enabled=False,
-            workout=None,
-        )
+async def test_apply_workout_change_maps_skipped_sync_to_saved_local(monkeypatch):
+    rec = RecommendationChange(
+        id=uuid4(),
+        status="pending",
+        workout_date=date(2026, 5, 4),
+        proposed_workout={
+            "workout_date": "2026-05-04",
+            "discipline": "rest",
+            "workout_type": "rest",
+            "target_duration": 0,
+        },
+        garmin_sync_status="pending",
     )
-    monkeypatch.setattr("src.agent.tools.is_assistant_owned_mode", lambda: True)
 
-    added = []
+    async def fake_create_intent(*args, **kwargs):
+        _ = (args, kwargs)
+        return rec
+
+    async def fake_decide(db, *, recommendation, decision, note, requested_changes=None):
+        _ = (db, decision, note, requested_changes)
+        recommendation.status = "approved"
+        recommendation.garmin_sync_status = "skipped"
+        recommendation.garmin_sync_result = {
+            "status": "skipped",
+            "reason": "garmin_writeback_disabled",
+        }
+        return recommendation
+
     fake_db = AsyncMock()
-    fake_db.add = added.append
-    fake_db.execute = fake_execute
-    fake_db.flush = fake_flush
-    fake_db.commit = fake_commit
-    fake_db.refresh = fake_refresh
+    fake_db.commit = AsyncMock()
+    fake_db.refresh = AsyncMock()
     fake_db.rollback = AsyncMock()
+
+    monkeypatch.setattr(
+        "src.agent.tools.create_coach_recommendation_intent",
+        fake_create_intent,
+    )
+    monkeypatch.setattr("src.agent.tools.decide_recommendation", fake_decide)
 
     result = await execute_tool(
         "apply_workout_change",
@@ -605,125 +600,11 @@ async def test_apply_workout_change_assistant_created_workout_is_visible(monkeyp
             "discipline": "rest",
             "workout_type": "rest",
             "target_duration": 0,
-            "description": "Full rest after Mount Archer.",
         },
         fake_db,
     )
-
-    parsed = json.loads(result)
-    assert parsed.get("created_new") is True
-    assert any(isinstance(obj, PlannedWorkout) for obj in added)
-    assert any(isinstance(obj, AssistantPlanEntry) for obj in added)
-
-
-@pytest.mark.asyncio
-async def test_apply_workout_change_can_change_existing_workout_discipline(
-    monkeypatch,
-):
-    existing = PlannedWorkout(
-        id=uuid4(),
-        date=date(2026, 5, 3),
-        discipline="strength",
-        workout_type="mobility_strength",
-        target_duration=30,
-        description="Mobility and activation work",
-        status="upcoming",
-        created_at=datetime.now(timezone.utc),
-    )
-
-    monkeypatch.setattr("src.agent.tools.is_assistant_owned_mode", lambda: True)
-    monkeypatch.setattr("src.config.settings.garmin_writeback_enabled", False)
-
-    async def fake_acquire_lock(db, workout_id):
-        return True
-
-    async def fake_release_lock(db, workout_id):
-        return True
-
-    monkeypatch.setattr("src.agent.tools.acquire_workout_lock", fake_acquire_lock)
-    monkeypatch.setattr("src.agent.tools.release_workout_lock", fake_release_lock)
-
-    class FakeQueryResult:
-        def __init__(self, value):
-            self.value = value
-
-        def scalar_one_or_none(self):
-            return self.value
-
-    execute_results = [None, existing]
-
-    async def fake_execute(stmt):
-        return FakeQueryResult(execute_results.pop(0))
-
-    added = []
-    fake_db = AsyncMock()
-    fake_db.add = added.append
-    fake_db.execute = fake_execute
-    fake_db.flush = AsyncMock()
-    fake_db.commit = AsyncMock()
-    fake_db.refresh = AsyncMock()
-    fake_db.rollback = AsyncMock()
-
-    result = await execute_tool(
-        "apply_workout_change",
-        {
-            "workout_date": "2026-05-03",
-            "discipline": "run",
-            "workout_type": "race",
-            "target_duration": 105,
-            "description": "Mount Archer Trail Race.",
-        },
-        fake_db,
-    )
-
-    parsed = json.loads(result)
-    assert parsed["status"] == "saved_local"
-    assert parsed.get("created_new") is None
-    assert existing.discipline == "run"
-    assert existing.workout_type == "race"
-    assert existing.target_duration == 105
-    assert existing.description.startswith("Mount Archer Trail Race.")
-    assert added == []
-
-
-@pytest.mark.asyncio
-async def test_apply_workout_change_writeback_disabled(monkeypatch):
-    fake_execute, fake_flush, fake_commit, fake_refresh = (
-        _make_apply_workout_change_patches(
-            monkeypatch,
-            writeback_enabled=False,
-            workout=None,
-        )
-    )
-
-    fake_db = AsyncMock()
-    fake_db.execute = fake_execute
-    fake_db.flush = fake_flush
-    fake_db.commit = fake_commit
-    fake_db.refresh = fake_refresh
-    fake_db.rollback = AsyncMock()
-    fake_db.no_autoflush = _no_autoflush_ctx()
-
-    result = await execute_tool(
-        "apply_workout_change",
-        {
-            "workout_date": "2026-04-21",
-            "discipline": "bike",
-            "target_duration": 45,
-        },
-        fake_db,
-    )
-
-    import json
 
     parsed = json.loads(result)
     assert parsed["status"] == "saved_local"
     assert parsed["garmin_sync"]["status"] == "skipped"
-
-
-class _no_autoflush_ctx:
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *args):
-        pass
+    assert parsed["pipeline"] == "recommendation_approval"

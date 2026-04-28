@@ -9,8 +9,6 @@ from datetime import date, datetime, timedelta, timezone
 from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.config import settings
-
 from src.db.models import (
     AlertLog,
     AssistantPlanEntry,
@@ -23,11 +21,9 @@ from src.db.models import (
     RecommendationChange,
 )
 from src.services.assistant_plan import (
-    acquire_workout_lock,
     assistant_plan_table_available,
     generate_assistant_plan,
     is_assistant_owned_mode,
-    release_workout_lock,
 )
 from src.services.recommendations import (
     create_coach_recommendation_intent,
@@ -285,11 +281,12 @@ TOOL_DEFINITIONS: list[dict] = [
     {
         "name": "apply_workout_change",
         "description": (
-            "Atomically apply a workout change: update the planned workout in the DB, "
-            "write back to Garmin (with verification), and return the final status. "
-            "Use only when the athlete explicitly asks you to change the plan now "
-            "or explicitly approves a pending recommendation. For proactive or "
-            "approval-gated recommendations, create a plan-change intent first."
+            "Immediately apply a workout change after explicit athlete approval. "
+            "This records an auto-approved recommendation intent, applies it through "
+            "the same approval pipeline used by chat approval cards, writes back to "
+            "Garmin with verification, and returns the final status. Use this only "
+            "when the athlete explicitly asks you to change the plan now. For existing "
+            "pending recommendations, use apply_plan_change_intent instead."
         ),
         "input_schema": {
             "type": "object",
@@ -300,7 +297,7 @@ TOOL_DEFINITIONS: list[dict] = [
                 },
                 "discipline": {
                     "type": "string",
-                    "description": "Target discipline (run/bike/swim/strength).",
+                    "description": "Target discipline (run/bike/swim/strength). Required when creating a new workout.",
                 },
                 "workout_type": {
                     "type": "string",
@@ -399,7 +396,8 @@ TOOL_DEFINITIONS: list[dict] = [
         "name": "apply_plan_change_intent",
         "description": (
             "Apply or reject a previously created plan-change intent through the execution "
-            "pipeline. Use only after the athlete explicitly approves."
+            "pipeline. Use only after the athlete explicitly approves an existing pending "
+            "recommendation."
         ),
         "input_schema": {
             "type": "object",
@@ -1416,12 +1414,7 @@ async def _apply_workout_change(
     reason: str | None = None,
 ) -> str:
     import json as _json
-    from uuid import uuid4 as _uuid4
 
-    from src.services.garmin_writeback import (
-        fallback_writeback_payload,
-        write_recommendation_change,
-    )
     from src.services.recommendations import (
         _coerce_float,
         _coerce_int,
@@ -1440,6 +1433,7 @@ async def _apply_workout_change(
             }
         )
 
+    note = (reason or "").strip() or "Athlete explicitly asked to apply this change."
     proposed: dict = {
         "workout_date": parsed_date.isoformat(),
         "discipline": _normalise_discipline(discipline),
@@ -1454,152 +1448,66 @@ async def _apply_workout_change(
         proposed["workout_steps"] = sanitized_steps
     proposed = _hydrate_proposed_workout_details(proposed)
 
-    async def _find_workout(*, match_discipline: bool) -> PlannedWorkout | None:
-        query = select(PlannedWorkout).where(
-            and_(
-                PlannedWorkout.date == parsed_date,
-                PlannedWorkout.status.in_(["upcoming", "modified"]),
-            )
-        )
-        if match_discipline and proposed.get("discipline"):
-            query = query.where(
-                PlannedWorkout.discipline.ilike(f"%{proposed['discipline']}%")
-            )
-        if is_assistant_owned_mode():
-            query = query.join(
-                AssistantPlanEntry,
-                AssistantPlanEntry.planned_workout_id == PlannedWorkout.id,
-            )
-        result = await db.execute(
-            query.order_by(PlannedWorkout.created_at.desc()).limit(1)
-        )
-        return result.scalar_one_or_none()
-
-    workout = await _find_workout(match_discipline=True)
-    if workout is None and proposed.get("discipline"):
-        workout = await _find_workout(match_discipline=False)
-
-    created_new = False
-    if workout is None:
-        workout = PlannedWorkout(
-            id=_uuid4(),
-            plan_id=None,
-            date=parsed_date,
-            discipline=proposed.get("discipline") or "run",
-            workout_type=proposed.get("workout_type") or "session",
-            target_duration=proposed.get("target_duration"),
-            target_distance=proposed.get("target_distance"),
-            description=proposed.get("description"),
-            status="modified",
-            created_at=datetime.now(timezone.utc),
-        )
-        db.add(workout)
-        await db.flush()
-        created_new = True
-        if is_assistant_owned_mode():
-            now = datetime.now(timezone.utc)
-            db.add(
-                AssistantPlanEntry(
-                    planned_workout_id=workout.id,
-                    garmin_sync_status="pending",
-                    created_at=now,
-                    updated_at=now,
-                )
-            )
-            await db.flush()
-
-    locked = False
     try:
-        locked = await acquire_workout_lock(db, workout.id)
+        recommendation_text = note
+        if proposed.get("workout_type") or proposed.get("discipline"):
+            recommendation_text = (
+                "Directly approved change: "
+                f"{proposed.get('discipline') or 'workout'} "
+                f"{proposed.get('workout_type') or 'session'} on {parsed_date.isoformat()}. "
+                f"{note}"
+            ).strip()
 
-        if proposed.get("discipline"):
-            workout.discipline = proposed["discipline"]
-        if proposed.get("workout_type"):
-            workout.workout_type = proposed["workout_type"]
-        new_dur = _coerce_int(proposed.get("target_duration"))
-        if new_dur is not None and new_dur > 0:
-            workout.target_duration = new_dur
-        new_dist = _coerce_float(proposed.get("target_distance"))
-        if new_dist is not None and new_dist > 0:
-            workout.target_distance = new_dist
-        if proposed.get("description"):
-            workout.description = proposed["description"]
-        workout.status = "modified"
+        rec = await create_coach_recommendation_intent(
+            db,
+            recommendation_text=recommendation_text,
+            proposed_workout=proposed,
+            source="coach_direct",
+        )
+        updated = await decide_recommendation(
+            db,
+            recommendation=rec,
+            decision="approved",
+            note=note,
+        )
+        await db.commit()
+        await db.refresh(updated)
 
-        await db.flush()
+        sync_status = str(updated.garmin_sync_status or "unknown").lower()
+        if sync_status == "success":
+            final_status = "success"
+        elif sync_status == "synced_unverified":
+            final_status = "synced_unverified"
+        elif sync_status == "skipped":
+            final_status = "saved_local"
+        elif sync_status == "pending":
+            final_status = "pending"
+        else:
+            final_status = "failed"
 
         changes_applied = {
             k: v for k, v in proposed.items() if v is not None and k != "reason"
         }
+        garmin_sync = updated.garmin_sync_result or {"status": sync_status}
 
-        garmin_sync: dict = {}
-        final_status = "saved_local"
-
-        if not settings.garmin_writeback_enabled:
-            garmin_sync = {"status": "skipped", "reason": "garmin_writeback_disabled"}
-            final_status = "saved_local"
-        else:
-            replace_workout_id = None
-            if is_assistant_owned_mode():
-                ape_result = await db.execute(
-                    select(AssistantPlanEntry).where(
-                        AssistantPlanEntry.planned_workout_id == workout.id
-                    )
-                )
-                ape = ape_result.scalar_one_or_none()
-                if ape and ape.garmin_workout_id:
-                    candidate = str(ape.garmin_workout_id).strip()
-                    if candidate:
-                        replace_workout_id = candidate
-
-            payload = fallback_writeback_payload(
-                workout_date=workout.date.isoformat(),
-                discipline=workout.discipline,
-                workout_type=workout.workout_type,
-                target_duration=workout.target_duration,
-                description=workout.description,
-                workout_steps=proposed.get("workout_steps")
-                if isinstance(proposed.get("workout_steps"), list)
-                else None,
-                replace_workout_id=replace_workout_id,
-                recommendation_text=reason,
-            )
-            garmin_sync = await write_recommendation_change(payload)
-
-            if is_assistant_owned_mode():
-                ape_result2 = await db.execute(
-                    select(AssistantPlanEntry).where(
-                        AssistantPlanEntry.planned_workout_id == workout.id
-                    )
-                )
-                ape2 = ape_result2.scalar_one_or_none()
-                if ape2 is not None:
-                    ape2.garmin_sync_status = str(garmin_sync.get("status", "failed"))
-                    ape2.garmin_sync_result = garmin_sync
-                    ape2.updated_at = datetime.now(timezone.utc)
-                    if garmin_sync.get("status") == "success":
-                        new_gwid = str(garmin_sync.get("workout_id") or "").strip()
-                        if new_gwid:
-                            ape2.garmin_workout_id = new_gwid
-
-            verify_status = garmin_sync.get("verification_status", "")
-            raw_status = str(garmin_sync.get("status", "failed"))
-            if verify_status == "success":
-                final_status = "success"
-            elif raw_status == "success":
-                final_status = "synced_unverified"
-            else:
-                final_status = "failed"
-
-        await db.commit()
-        await db.refresh(workout)
+        created_new = False
+        for event in (updated.training_impact_log or {}).get("events", []):
+            if event.get("event") == "approved" and event.get("before") is None:
+                created_new = True
+                break
 
         response = {
             "status": final_status,
-            "workout_id": str(workout.id),
-            "workout_date": workout.date.isoformat(),
+            "intent_id": str(updated.id),
+            "workout_id": str(updated.planned_workout_id)
+            if updated.planned_workout_id
+            else None,
+            "workout_date": updated.workout_date.isoformat()
+            if updated.workout_date
+            else parsed_date.isoformat(),
             "changes_applied": changes_applied,
             "garmin_sync": garmin_sync,
+            "pipeline": "recommendation_approval",
         }
         if created_new:
             response["created_new"] = True
@@ -1607,12 +1515,6 @@ async def _apply_workout_change(
     except Exception as exc:
         await db.rollback()
         return _json.dumps({"status": "failed", "error": str(exc)})
-    finally:
-        if locked:
-            try:
-                await release_workout_lock(db, workout.id)
-            except Exception:
-                pass
 
 
 async def _create_plan_change_intent(
