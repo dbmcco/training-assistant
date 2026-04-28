@@ -10,7 +10,12 @@ from src.agent.tools import (
     _normalize_discipline_filter,
     execute_tool,
 )
-from src.db.models import AssistantPlanEntry, GarminActivity, PlannedWorkout
+from src.db.models import (
+    AssistantPlanEntry,
+    GarminActivity,
+    PlannedWorkout,
+    RecommendationChange,
+)
 
 
 EXPECTED_TOOL_NAMES = [
@@ -274,20 +279,48 @@ async def test_execute_create_plan_change_intent(monkeypatch):
                 "target_duration": 50,
             },
             session,
-        )
+    )
     assert "intent created" in result.lower()
-    assert "auto-applied" in result.lower() or "pending" in result.lower()
+    assert "awaiting athlete approval" in result.lower()
+    assert "auto-applied" not in result.lower()
 
 
 @pytest.mark.asyncio
-async def test_execute_apply_plan_change_intent():
+async def test_execute_apply_plan_change_intent(monkeypatch):
+    rec = RecommendationChange(
+        id=uuid4(),
+        status="pending",
+        workout_date=date(2026, 5, 5),
+        garmin_sync_status="pending",
+    )
+
+    class FakeResult:
+        def scalar_one_or_none(self):
+            return rec
+
+    fake_db = AsyncMock()
+    fake_db.execute = AsyncMock(return_value=FakeResult())
+    fake_db.commit = AsyncMock()
+    fake_db.refresh = AsyncMock()
+    fake_db.rollback = AsyncMock()
+
+    async def fake_decide(db, *, recommendation, decision, note, requested_changes=None):
+        recommendation.status = decision
+        recommendation.garmin_sync_status = "success"
+        recommendation.garmin_sync_result = {"status": "success"}
+        return recommendation
+
+    monkeypatch.setattr("src.agent.tools.decide_recommendation", fake_decide)
+
     result = await execute_tool(
         "apply_plan_change_intent",
-        {"intent_id": str(uuid4()), "decision": "approved"},
-        AsyncMock(),
+        {"intent_id": str(rec.id), "decision": "approved"},
+        fake_db,
     )
-    assert isinstance(result, str)
-    assert "no-op" in result.lower() or "alias" in result.lower()
+    parsed = json.loads(result)
+    assert parsed["status"] == "approved"
+    assert parsed["garmin_sync_status"] == "success"
+    fake_db.commit.assert_awaited_once()
 
 
 @pytest.mark.asyncio

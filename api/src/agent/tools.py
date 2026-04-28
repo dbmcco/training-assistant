@@ -287,8 +287,9 @@ TOOL_DEFINITIONS: list[dict] = [
         "description": (
             "Atomically apply a workout change: update the planned workout in the DB, "
             "write back to Garmin (with verification), and return the final status. "
-            "This is the preferred single-step tool — use it instead of the old "
-            "create/apply two-step flow."
+            "Use only when the athlete explicitly asks you to change the plan now "
+            "or explicitly approves a pending recommendation. For proactive or "
+            "approval-gated recommendations, create a plan-change intent first."
         ),
         "input_schema": {
             "type": "object",
@@ -335,9 +336,10 @@ TOOL_DEFINITIONS: list[dict] = [
     {
         "name": "create_plan_change_intent",
         "description": (
-            "[Legacy] Create a detailed, approval-gated plan-change intent. "
-            "Prefer apply_workout_change for atomic one-step changes. "
-            "This records the coach's proposed change but does NOT apply it yet."
+            "Create a detailed, approval-gated plan-change intent. "
+            "Use this for proactive recommendations or whenever the athlete asks "
+            "you to ask/check before changing. This records the proposed change "
+            "and creates the visible chat approval card, but does NOT apply it."
         ),
         "input_schema": {
             "type": "object",
@@ -1614,55 +1616,38 @@ async def _create_plan_change_intent(
             if pw and pw.date:
                 effective_date = pw.date.isoformat()
 
-    if not effective_date:
-        proposed_workout: dict = {
-            "workout_id": workout_id,
-            "workout_date": workout_date,
-            "discipline": discipline,
-            "workout_type": workout_type,
-            "target_duration": target_duration,
-            "target_distance": target_distance,
-            "target_hr_zone": target_hr_zone,
-            "description": description,
-            "reason": reason,
-        }
-        if workout_steps:
-            proposed_workout["workout_steps"] = workout_steps
+    proposed_workout: dict = {
+        "workout_id": workout_id,
+        "workout_date": effective_date,
+        "discipline": discipline,
+        "workout_type": workout_type,
+        "target_duration": target_duration,
+        "target_distance": target_distance,
+        "target_hr_zone": target_hr_zone,
+        "description": description,
+        "reason": reason,
+    }
+    if workout_steps:
+        proposed_workout["workout_steps"] = workout_steps
 
-        try:
-            rec = await create_coach_recommendation_intent(
-                db,
-                recommendation_text=recommendation_text,
-                proposed_workout=proposed_workout,
-                source="coach_intent",
-            )
-            await db.commit()
-        except ValueError as exc:
-            await db.rollback()
-            return f"Could not create plan intent: {exc}"
-
-        return (
-            "Plan change intent created (legacy two-step; prefer apply_workout_change).\n"
-            f"  Intent ID: {rec.id}\n"
-            f"  Status: {rec.status}\n"
-            f"  Target date: {rec.workout_date}\n"
-            "Await athlete approval, then call apply_plan_change_intent with decision=approved."
+    try:
+        rec = await create_coach_recommendation_intent(
+            db,
+            recommendation_text=recommendation_text,
+            proposed_workout=proposed_workout,
+            source="coach_intent",
         )
+        await db.commit()
+    except ValueError as exc:
+        await db.rollback()
+        return f"Could not create plan intent: {exc}"
 
-    merged_result = await _apply_workout_change(
-        db,
-        workout_date=effective_date,
-        discipline=discipline,
-        workout_type=workout_type,
-        target_duration=target_duration,
-        target_distance=target_distance,
-        description=description,
-        workout_steps=workout_steps,
-        reason=reason or recommendation_text,
-    )
     return (
-        f"Plan change intent created and auto-applied via apply_workout_change.\n"
-        f"  {merged_result}"
+        "Plan change intent created and awaiting athlete approval.\n"
+        f"  Intent ID: {rec.id}\n"
+        f"  Status: {rec.status}\n"
+        f"  Target date: {rec.workout_date}\n"
+        "Tell the athlete this is pending and use apply_plan_change_intent only after approval."
     )
 
 
@@ -1673,10 +1658,45 @@ async def _apply_plan_change_intent(
     note: str | None = None,
     requested_changes: str | None = None,
 ) -> str:
-    return (
-        "apply_plan_change_intent is now a no-op alias. "
-        "Use apply_workout_change for atomic one-step workout changes. "
-        f"Intent {intent_id} was not processed through the legacy pipeline."
+    import json as _json
+    from uuid import UUID
+
+    try:
+        rec_id = UUID(intent_id)
+    except (TypeError, ValueError):
+        return _json.dumps({"status": "failed", "error": "Invalid intent_id"})
+
+    result = await db.execute(
+        select(RecommendationChange).where(RecommendationChange.id == rec_id)
+    )
+    rec = result.scalar_one_or_none()
+    if rec is None:
+        return _json.dumps({"status": "failed", "error": "Intent not found"})
+
+    try:
+        updated = await decide_recommendation(
+            db,
+            recommendation=rec,
+            decision=decision,
+            note=note,
+            requested_changes=requested_changes,
+        )
+        await db.commit()
+        await db.refresh(updated)
+    except ValueError as exc:
+        await db.rollback()
+        return _json.dumps({"status": "failed", "error": str(exc)})
+
+    return _json.dumps(
+        {
+            "status": updated.status,
+            "intent_id": str(updated.id),
+            "workout_date": (
+                updated.workout_date.isoformat() if updated.workout_date else None
+            ),
+            "garmin_sync_status": updated.garmin_sync_status,
+            "garmin_sync_result": updated.garmin_sync_result,
+        }
     )
 
 
