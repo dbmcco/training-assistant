@@ -73,6 +73,16 @@ class MockAsyncStream:
         return self._final_message
 
 
+def _done_conversation_id(body: str) -> str:
+    for line in body.strip().split("\n"):
+        if not line.startswith("data:"):
+            continue
+        payload = json.loads(line[len("data:"):].strip())
+        if "conversation_id" in payload:
+            return payload["conversation_id"]
+    raise AssertionError("done event with conversation_id not found")
+
+
 # ---------------------------------------------------------------------------
 # POST /api/v1/chat — SSE streaming
 # ---------------------------------------------------------------------------
@@ -157,6 +167,39 @@ async def test_chat_with_conversation_id():
     assert "text/event-stream" in resp.headers.get("content-type", "")
 
 
+@pytest.mark.asyncio
+async def test_chat_without_conversation_id_starts_new_conversation():
+    """A missing conversation_id should mean a fresh server-side conversation."""
+    events = [_make_text_delta_event("ok")]
+    final_msg = _make_final_message(stop_reason="end_turn", content_text="ok")
+
+    mock_client = MagicMock()
+    mock_client.messages = MagicMock()
+    mock_client.messages.stream = MagicMock(
+        side_effect=[
+            MockAsyncStream(events, final_msg),
+            MockAsyncStream(events, final_msg),
+        ]
+    )
+
+    with patch("src.agent.coach.client", mock_client):
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            first = await client.post(
+                "/api/v1/chat",
+                json={"message": "start isolated chat one"},
+            )
+            second = await client.post(
+                "/api/v1/chat",
+                json={"message": "start isolated chat two"},
+            )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert _done_conversation_id(first.text) != _done_conversation_id(second.text)
+
+
 # ---------------------------------------------------------------------------
 # GET /api/v1/conversations — list
 # ---------------------------------------------------------------------------
@@ -211,17 +254,20 @@ async def test_get_conversation_paginates_history():
                 json={"message": "history message 1"},
             )
             assert first_chat.status_code == 200
+            conv_id = _done_conversation_id(first_chat.text)
 
             await client.post(
                 "/api/v1/chat",
                 json={
                     "message": "history message 2",
+                    "conversation_id": conv_id,
                 },
             )
             await client.post(
                 "/api/v1/chat",
                 json={
                     "message": "history message 3",
+                    "conversation_id": conv_id,
                 },
             )
             conversations_resp = await client.get("/api/v1/conversations")

@@ -625,15 +625,23 @@ async def create_coach_recommendation_intent(
     if not proposed:
         raise ValueError("Intent requires a proposed workout payload.")
 
+    parsed_workout_id = _parse_uuid(proposed.get("workout_id"))
+    parsed_workout_date = _parse_date(proposed.get("workout_date"))
+    if parsed_workout_id is None and parsed_workout_date is None:
+        raise ValueError("Intent requires workout_date or workout_id.")
+
     target_workout = await _find_target_workout(
         db,
-        workout_id=_parse_uuid(proposed.get("workout_id")),
-        workout_date=_parse_date(proposed.get("workout_date")),
+        workout_id=parsed_workout_id,
+        workout_date=parsed_workout_date,
         discipline=_normalise_discipline(proposed.get("discipline")),
     )
-    workout_date = _parse_date(proposed.get("workout_date")) or (
-        target_workout.date if target_workout else None
-    )
+    workout_date = parsed_workout_date or (target_workout.date if target_workout else None)
+    if workout_date is None:
+        raise ValueError("Intent requires workout_date or a resolvable workout_id.")
+
+    if target_workout is None and not _normalise_discipline(proposed.get("discipline")):
+        raise ValueError("Intent for a new workout requires discipline.")
 
     now = datetime.now(timezone.utc)
     rec = RecommendationChange(

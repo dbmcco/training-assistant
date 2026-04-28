@@ -227,20 +227,9 @@ async def _build_dynamic_context(db: AsyncSession) -> dict:
 async def _resolve_conversation_id(
     db: AsyncSession, requested_conversation_id: str | None
 ) -> str | None:
-    """Use requested conversation_id, else continue the latest conversation."""
-    if requested_conversation_id:
-        return requested_conversation_id
-
-    result = await db.execute(
-        select(Conversation.id)
-        .order_by(
-            Conversation.updated_at.desc().nullslast(),
-            Conversation.created_at.desc().nullslast(),
-        )
-        .limit(1)
-    )
-    latest_id = result.scalar_one_or_none()
-    return str(latest_id) if latest_id else None
+    """Use only an explicit conversation_id; missing means start fresh."""
+    _ = db
+    return requested_conversation_id
 
 
 async def _load_conversation_history(
@@ -651,62 +640,26 @@ async def run_coach(
                         "Cannot resolve legacy conversation defaults (channel_id/assistant_id)"
                     )
                 channel_id, assistant_id = defaults
-                existing_legacy = await db.execute(
+                await db.execute(
                     text(
                         """
-                        SELECT id
-                        FROM conversations
-                        WHERE channel_id = :channel_id
-                          AND assistant_id = :assistant_id
-                          AND date = :date
-                        ORDER BY created_at DESC
-                        LIMIT 1
+                        INSERT INTO conversations (
+                            id, channel_id, assistant_id, date, title, created_at, updated_at
+                        ) VALUES (
+                            :id, :channel_id, :assistant_id, :date, :title, :created_at, :updated_at
+                        )
                         """
                     ),
                     {
+                        "id": conversation_id,
                         "channel_id": channel_id,
                         "assistant_id": assistant_id,
                         "date": now.date(),
+                        "title": title,
+                        "created_at": now,
+                        "updated_at": now,
                     },
                 )
-                legacy_id = existing_legacy.scalar_one_or_none()
-                if legacy_id is not None:
-                    conversation_id = str(legacy_id)
-                    await db.execute(
-                        text(
-                            """
-                            UPDATE conversations
-                            SET title = :title, updated_at = :updated_at
-                            WHERE id = :id
-                            """
-                        ),
-                        {
-                            "id": conversation_id,
-                            "title": title,
-                            "updated_at": now,
-                        },
-                    )
-                else:
-                    await db.execute(
-                        text(
-                            """
-                            INSERT INTO conversations (
-                                id, channel_id, assistant_id, date, title, created_at, updated_at
-                            ) VALUES (
-                                :id, :channel_id, :assistant_id, :date, :title, :created_at, :updated_at
-                            )
-                            """
-                        ),
-                        {
-                            "id": conversation_id,
-                            "channel_id": channel_id,
-                            "assistant_id": assistant_id,
-                            "date": now.date(),
-                            "title": title,
-                            "created_at": now,
-                            "updated_at": now,
-                        },
-                    )
             else:
                 conv = Conversation(
                     id=conversation_id, title=title, created_at=now, updated_at=now

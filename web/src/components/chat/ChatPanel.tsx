@@ -436,6 +436,7 @@ export default function ChatPanel({ isOpen, onToggle }: ChatPanelProps) {
                 return updated
               })
             }
+            queryClient.invalidateQueries({ queryKey: ['recommendations', 'recent'] })
             // Do not wait for socket close; once done is received, unlock input.
             return
           }

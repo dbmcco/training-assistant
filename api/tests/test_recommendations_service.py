@@ -6,7 +6,10 @@ import pytest
 
 from src.config import settings
 from src.db.models import PlannedWorkout, RecommendationChange
-from src.services.recommendations import decide_recommendation
+from src.services.recommendations import (
+    create_coach_recommendation_intent,
+    decide_recommendation,
+)
 
 
 def _last_event(rec: RecommendationChange, event_name: str) -> dict | None:
@@ -555,3 +558,19 @@ async def test_approve_recommendation_without_existing_target_creates_local_work
     assert updated.garmin_sync_status == "success"
     assert any(getattr(item, "planned_workout_id", None) == created.id for item in added)
     db.flush.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_create_intent_rejects_non_actionable_payload():
+    db = AsyncMock()
+
+    with patch(
+        "src.services.recommendations.recommendation_table_available",
+        AsyncMock(return_value=True),
+    ):
+        with pytest.raises(ValueError, match="workout_date or workout_id"):
+            await create_coach_recommendation_intent(
+                db,
+                recommendation_text="Maybe adjust the plan.",
+                proposed_workout={},
+            )
