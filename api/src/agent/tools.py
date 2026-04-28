@@ -427,6 +427,34 @@ TOOL_DEFINITIONS: list[dict] = [
         },
     },
     {
+        "name": "get_pending_plan_change_intents",
+        "description": (
+            "List pending approval-gated plan-change intents with IDs, dates, "
+            "disciplines, and summaries. Use this before applying an approval "
+            "when the athlete refers to a pending recommendation by date, "
+            "discipline, or wording instead of giving an intent ID."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "workout_date": {
+                    "type": "string",
+                    "description": "Optional date filter in YYYY-MM-DD.",
+                },
+                "discipline": {
+                    "type": "string",
+                    "description": "Optional discipline filter.",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum pending intents to return.",
+                    "default": 10,
+                },
+            },
+            "required": [],
+        },
+    },
+    {
         "name": "update_athlete_profile",
         "description": (
             "Store a learned observation about the athlete in their profile. "
@@ -568,6 +596,7 @@ async def execute_tool(name: str, args: dict, db: AsyncSession) -> str:
         "modify_workout": _modify_workout,
         "apply_workout_change": _apply_workout_change,
         "create_plan_change_intent": _create_plan_change_intent,
+        "get_pending_plan_change_intents": _get_pending_plan_change_intents,
         "apply_plan_change_intent": _apply_plan_change_intent,
         "update_athlete_profile": _update_athlete_profile,
         "get_discipline_distribution": _get_discipline_distribution,
@@ -1649,6 +1678,64 @@ async def _create_plan_change_intent(
         f"  Target date: {rec.workout_date}\n"
         "Tell the athlete this is pending and use apply_plan_change_intent only after approval."
     )
+
+
+async def _get_pending_plan_change_intents(
+    db: AsyncSession,
+    workout_date: str | None = None,
+    discipline: str | None = None,
+    limit: int = 10,
+) -> str:
+    if not await recommendation_table_available(db):
+        return "No recommendation pipeline is available."
+
+    parsed_date: date | None = None
+    if workout_date:
+        try:
+            parsed_date = date.fromisoformat(workout_date)
+        except (TypeError, ValueError):
+            return f"Invalid workout_date: {workout_date}. Use YYYY-MM-DD."
+
+    bounded_limit = max(1, min(int(limit or 10), 25))
+    query = (
+        select(RecommendationChange)
+        .where(RecommendationChange.status == "pending")
+        .order_by(RecommendationChange.created_at.desc())
+        .limit(bounded_limit)
+    )
+    if parsed_date is not None:
+        query = query.where(RecommendationChange.workout_date == parsed_date)
+
+    result = await db.execute(query)
+    rows = list(result.scalars().all())
+
+    normalized_discipline = _normalize_discipline_filter(discipline)
+    if normalized_discipline != "all":
+        rows = [
+            row for row in rows
+            if _normalize_discipline_filter(
+                str((row.proposed_workout or {}).get("discipline") or "")
+            ) == normalized_discipline
+        ]
+
+    if not rows:
+        return "No pending plan change intents found."
+
+    lines = ["Pending plan change intents:"]
+    for row in rows:
+        proposed = row.proposed_workout or {}
+        date_text = row.workout_date.isoformat() if row.workout_date else "unknown-date"
+        discipline_text = proposed.get("discipline") or "unknown"
+        workout_type = proposed.get("workout_type") or "session"
+        duration = proposed.get("target_duration")
+        duration_text = f", {duration} min" if duration is not None else ""
+        lines.append(
+            "  - "
+            f"Intent ID: {row.id} | {date_text} | "
+            f"{discipline_text} {workout_type}{duration_text} | "
+            f"{row.recommendation_text or 'No summary'}"
+        )
+    return "\n".join(lines)
 
 
 async def _apply_plan_change_intent(

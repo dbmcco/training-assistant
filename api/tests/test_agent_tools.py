@@ -33,6 +33,7 @@ EXPECTED_TOOL_NAMES = [
     "modify_workout",
     "apply_workout_change",
     "create_plan_change_intent",
+    "get_pending_plan_change_intents",
     "apply_plan_change_intent",
     "update_athlete_profile",
     "get_discipline_distribution",
@@ -283,6 +284,48 @@ async def test_execute_create_plan_change_intent(monkeypatch):
     assert "intent created" in result.lower()
     assert "awaiting athlete approval" in result.lower()
     assert "auto-applied" not in result.lower()
+
+
+@pytest.mark.asyncio
+async def test_execute_get_pending_plan_change_intents(monkeypatch):
+    rec = RecommendationChange(
+        id=uuid4(),
+        status="pending",
+        workout_date=date(2026, 5, 5),
+        recommendation_text="Reduce Tuesday swim to recovery effort.",
+        proposed_workout={
+            "discipline": "swim",
+            "workout_type": "recovery_swim",
+            "target_duration": 30,
+        },
+    )
+
+    class FakeScalars:
+        def all(self):
+            return [rec]
+
+    class FakeResult:
+        def scalars(self):
+            return FakeScalars()
+
+    fake_db = AsyncMock()
+    fake_db.execute = AsyncMock(return_value=FakeResult())
+
+    monkeypatch.setattr(
+        "src.agent.tools.recommendation_table_available",
+        AsyncMock(return_value=True),
+    )
+
+    result = await execute_tool(
+        "get_pending_plan_change_intents",
+        {"limit": 5},
+        fake_db,
+    )
+
+    assert str(rec.id) in result
+    assert "2026-05-05" in result
+    assert "recovery_swim" in result
+    assert "Reduce Tuesday swim" in result
 
 
 @pytest.mark.asyncio
