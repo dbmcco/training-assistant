@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timezone
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy import and_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -461,6 +461,40 @@ async def decide_recommendation(
                 db,
                 workout=target,
             )
+
+        if target is None and proposed:
+            workout_date = _parse_date(proposed.get("workout_date")) or recommendation.workout_date
+            discipline = _normalise_discipline(proposed.get("discipline"))
+            workout_type = str(proposed.get("workout_type") or "session").strip()
+            if workout_date and discipline:
+                target = PlannedWorkout(
+                    id=uuid4(),
+                    plan_id=None,
+                    date=workout_date,
+                    discipline=discipline,
+                    workout_type=workout_type or "session",
+                    target_duration=_coerce_int(proposed.get("target_duration")),
+                    target_distance=_coerce_float(proposed.get("target_distance")),
+                    target_hr_zone=_coerce_int(proposed.get("target_hr_zone")),
+                    description=str(proposed.get("description") or "").strip() or None,
+                    status="upcoming",
+                    created_at=now,
+                )
+                db.add(target)
+                await db.flush()
+                recommendation.planned_workout_id = target.id
+
+                if _assistant_mode():
+                    assistant_entry = AssistantPlanEntry(
+                        id=uuid4(),
+                        planned_workout_id=target.id,
+                        is_locked=False,
+                        garmin_sync_status="pending",
+                        created_at=now,
+                        updated_at=now,
+                    )
+                    db.add(assistant_entry)
+
         replace_workout_id = None
         if assistant_entry and assistant_entry.garmin_workout_id:
             candidate = str(assistant_entry.garmin_workout_id).strip()

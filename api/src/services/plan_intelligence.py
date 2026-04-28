@@ -22,6 +22,7 @@ from src.db.models import (
     Message,
     PlannedWorkout,
     Race,
+    RecommendationChange,
 )
 from src.services.analytics import (
     _classify_discipline,
@@ -44,6 +45,7 @@ from src.services.garmin_writeback import (
     write_recommendation_change,
 )
 from src.services.plan_engine import get_plan_adherence
+from src.services.recommendations import create_coach_recommendation_intent
 
 logger = logging.getLogger(__name__)
 
@@ -236,6 +238,12 @@ For each workout, provide concrete session structure:
 - Swim: yards and pace targets (per 100yd)
 - Bike: power/zone targets, cadence, and duration
 - Strength: specific exercises, sets, reps with cues
+- Use a workout_type that matches the discipline:
+  - run: recovery_run, endurance_run, long_run, tempo_run, intervals
+  - bike: recovery_spin, easy_spin, quality_intervals, long_ride
+  - swim: recovery_swim, endurance_builder, speed_set
+  - strength: mobility_strength
+  - rest: rest
 
 Respond with ONLY valid JSON matching this schema:
 {
@@ -244,7 +252,7 @@ Respond with ONLY valid JSON matching this schema:
     {
       "day": "monday|tuesday|wednesday|thursday|friday|saturday|sunday",
       "discipline": "run|bike|swim|strength|rest",
-      "workout_type": "endurance_run|long_run|tempo_run|intervals|easy_spin|quality_intervals|long_ride|endurance_builder|speed_set|mobility_strength|rest",
+      "workout_type": "recovery_run|endurance_run|long_run|tempo_run|intervals|recovery_spin|easy_spin|quality_intervals|long_ride|recovery_swim|endurance_builder|speed_set|mobility_strength|rest",
       "duration_minutes": 45,
       "summary": "One-line description of the session",
       "session_plan": [
@@ -449,6 +457,62 @@ DAY_TO_WEEKDAY = {
 }
 
 
+def _workout_date_for_model_day(
+    window_start: date,
+    workout_data: dict[str, Any],
+) -> date | None:
+    day_name = str(workout_data.get("day") or "").strip().lower()
+    weekday = DAY_TO_WEEKDAY.get(day_name)
+    if weekday is None:
+        return None
+    return window_start + timedelta(days=weekday)
+
+
+def _proposal_from_model_workout(
+    window_start: date,
+    workout_data: dict[str, Any],
+) -> dict[str, Any] | None:
+    workout_date = _workout_date_for_model_day(window_start, workout_data)
+    if workout_date is None:
+        return None
+
+    discipline = str(workout_data.get("discipline") or "other").strip().lower()
+    duration = int(workout_data.get("duration_minutes") or 0)
+    if discipline == "rest":
+        return {
+            "workout_date": workout_date.isoformat(),
+            "discipline": "run",
+            "workout_type": "rest",
+            "target_duration": 0,
+            "description": workout_data.get("summary") or "Rest day.",
+            "reason": "Model recommends rest for this date.",
+        }
+
+    raw_steps = workout_data.get("session_plan") or []
+    step_duration = max(round(duration / len(raw_steps)), 1) if raw_steps else duration
+    workout_steps = [
+        {
+            "type": "interval",
+            "duration_minutes": step_duration,
+            "label": step.get("label", "Step") if isinstance(step, dict) else "Step",
+            "target": step.get("target") if isinstance(step, dict) else None,
+            "cue": step.get("cue") if isinstance(step, dict) else None,
+        }
+        for step in raw_steps
+        if isinstance(step, dict)
+    ]
+
+    return {
+        "workout_date": workout_date.isoformat(),
+        "discipline": discipline,
+        "workout_type": workout_data.get("workout_type") or "session",
+        "target_duration": duration,
+        "description": render_workout_description(workout_data),
+        "workout_steps": workout_steps,
+        "reason": workout_data.get("summary") or "Model-generated weekly plan proposal.",
+    }
+
+
 async def write_intelligent_plan(
     db: AsyncSession,
     plan: dict[str, Any],
@@ -574,6 +638,79 @@ async def write_intelligent_plan(
     }
 
 
+async def create_plan_review_intents(
+    db: AsyncSession,
+    plan: dict[str, Any],
+    *,
+    ctx: dict[str, Any],
+) -> dict[str, Any]:
+    """Create approval-gated recommendations from a model-generated plan."""
+    window_start = date.fromisoformat(ctx["planning_window_start"])
+    window_end = date.fromisoformat(ctx["planning_window_end"])
+
+    created: list[RecommendationChange] = []
+    skipped_existing = 0
+    skipped_invalid = 0
+
+    for workout_data in plan.get("workouts", []):
+        proposed = _proposal_from_model_workout(window_start, workout_data)
+        if proposed is None:
+            skipped_invalid += 1
+            continue
+
+        workout_date = _workout_date_for_model_day(window_start, workout_data)
+        if workout_date is None:
+            skipped_invalid += 1
+            continue
+
+        existing_result = await db.execute(
+            select(RecommendationChange)
+            .where(
+                and_(
+                    RecommendationChange.source == "proactive_plan",
+                    RecommendationChange.status == "pending",
+                    RecommendationChange.workout_date == workout_date,
+                )
+            )
+            .order_by(RecommendationChange.created_at.desc())
+            .limit(1)
+        )
+        if existing_result.scalar_one_or_none():
+            skipped_existing += 1
+            continue
+
+        summary = str(
+            workout_data.get("summary")
+            or workout_data.get("workout_type")
+            or "training session"
+        ).strip()
+        rec = await create_coach_recommendation_intent(
+            db,
+            recommendation_text=(
+                "Weekly plan review proposes "
+                f"{summary} on {workout_date.isoformat()}."
+            ),
+            proposed_workout=proposed,
+            source="proactive_plan",
+        )
+        created.append(rec)
+
+    return {
+        "phase": ctx.get("phase", "unknown"),
+        "reasoning": plan.get("reasoning", ""),
+        "window_start": window_start.isoformat(),
+        "window_end": window_end.isoformat(),
+        "created_recommendations": len(created),
+        "created_recommendation_ids": [str(rec.id) for rec in created],
+        "skipped_existing": skipped_existing,
+        "skipped_invalid": skipped_invalid,
+        "created_workouts": 0,
+        "synced_success": 0,
+        "synced_failed": 0,
+        "synced_skipped": 0,
+    }
+
+
 async def post_plan_summary(
     db: AsyncSession,
     result: dict[str, Any],
@@ -630,6 +767,65 @@ async def post_plan_summary(
     conversation.updated_at = datetime.now(timezone.utc)
 
 
+async def post_plan_review_summary(
+    db: AsyncSession,
+    result: dict[str, Any],
+    plan: dict[str, Any],
+) -> None:
+    """Post a proactive review summary without implying changes were applied."""
+    conv_result = await db.execute(
+        select(Conversation).order_by(Conversation.updated_at.desc()).limit(1)
+    )
+    conversation = conv_result.scalar_one_or_none()
+    if not conversation:
+        conversation = Conversation(
+            title="Coach",
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+        db.add(conversation)
+        await db.flush()
+
+    reasoning = plan.get("reasoning", "Plan reviewed.")
+    lines = [
+        f"**Weekly Plan Review Ready** ({result.get('window_start')} -> {result.get('window_end')})",
+        "",
+        reasoning,
+        "",
+        (
+            f"I created {result.get('created_recommendations', 0)} approval "
+            "request(s). No workouts have been changed or synced to Garmin yet."
+        ),
+    ]
+
+    workouts = plan.get("workouts", [])
+    if workouts:
+        lines.extend(["", "**Proposed schedule:**"])
+        for workout in workouts:
+            day = str(workout.get("day") or "?").capitalize()
+            discipline = str(workout.get("discipline") or "?")
+            if discipline == "rest":
+                lines.append(f"- {day}: Rest")
+            else:
+                duration = workout.get("duration_minutes", "?")
+                summary = workout.get("summary", workout.get("workout_type", "session"))
+                lines.append(f"- {day}: {discipline} - {summary} ({duration} min)")
+
+    if result.get("skipped_existing", 0):
+        lines.append(
+            f"\nSkipped {result['skipped_existing']} date(s) with existing pending approval requests."
+        )
+
+    msg = Message(
+        conversation_id=conversation.id,
+        role="assistant",
+        content="\n".join(lines),
+        created_at=datetime.now(timezone.utc),
+    )
+    db.add(msg)
+    conversation.updated_at = datetime.now(timezone.utc)
+
+
 async def run_intelligent_plan_generation(
     db: AsyncSession,
     *,
@@ -640,5 +836,15 @@ async def run_intelligent_plan_generation(
     plan = await generate_intelligent_plan(db, ctx=ctx)
     result = await write_intelligent_plan(db, plan, sync_to_garmin=sync_to_garmin)
     await post_plan_summary(db, result, plan)
+    await db.commit()
+    return result
+
+
+async def run_intelligent_plan_review(db: AsyncSession) -> dict[str, Any]:
+    """Full orchestration for scheduled proactive review with approval gating."""
+    ctx = await gather_planning_context(db)
+    plan = await generate_intelligent_plan(db, ctx=ctx)
+    result = await create_plan_review_intents(db, plan, ctx=ctx)
+    await post_plan_review_summary(db, result, plan)
     await db.commit()
     return result

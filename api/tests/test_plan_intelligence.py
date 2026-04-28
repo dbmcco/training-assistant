@@ -4,7 +4,9 @@
 import json
 import pytest
 from datetime import date, timedelta
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
+from uuid import uuid4
 
 from src.db.connection import async_session
 
@@ -150,3 +152,75 @@ def test_render_workout_description():
     assert "2. 4.0 mi steady run @ 7:50-8:20/mi" in desc
     assert "Coaching Cues:" in desc
     assert "- Stay in zone 2." in desc
+
+
+def test_proposal_from_model_workout_maps_day_date_and_steps():
+    from src.services.plan_intelligence import _proposal_from_model_workout
+
+    proposal = _proposal_from_model_workout(
+        date(2026, 5, 4),
+        {
+            "day": "wednesday",
+            "discipline": "run",
+            "workout_type": "endurance_run",
+            "duration_minutes": 45,
+            "summary": "Easy aerobic run.",
+            "session_plan": [
+                {"label": "Warm up", "target": "Z1", "cue": "Relax"},
+                {"label": "Steady run", "target": "Z2", "cue": None},
+            ],
+            "coaching_cues": ["Keep it controlled."],
+        },
+    )
+
+    assert proposal["workout_date"] == "2026-05-06"
+    assert proposal["discipline"] == "run"
+    assert proposal["target_duration"] == 45
+    assert len(proposal["workout_steps"]) == 2
+    assert proposal["workout_steps"][0]["duration_minutes"] == 22
+    assert "Session Plan:" in proposal["description"]
+
+
+@pytest.mark.asyncio
+async def test_create_plan_review_intents_creates_pending_recommendations_without_writes():
+    from src.services.plan_intelligence import create_plan_review_intents
+
+    db = AsyncMock()
+    db.execute.return_value = SimpleNamespace(scalar_one_or_none=lambda: None)
+    created_ids = [uuid4()]
+
+    async def fake_create_intent(*args, **kwargs):
+        assert kwargs["source"] == "proactive_plan"
+        assert kwargs["proposed_workout"]["workout_date"] == "2026-05-04"
+        return SimpleNamespace(id=created_ids[0])
+
+    plan = {
+        "reasoning": "Race added, keep the following week recovery-oriented.",
+        "workouts": [
+            {
+                "day": "monday",
+                "discipline": "swim",
+                "workout_type": "recovery_swim",
+                "duration_minutes": 35,
+                "summary": "Recovery swim.",
+                "session_plan": [{"label": "Easy swim", "target": "RPE 2"}],
+            }
+        ],
+    }
+    ctx = {
+        "phase": "race_week",
+        "planning_window_start": "2026-05-04",
+        "planning_window_end": "2026-05-10",
+    }
+
+    with patch(
+        "src.services.plan_intelligence.create_coach_recommendation_intent",
+        AsyncMock(side_effect=fake_create_intent),
+    ) as create_mock:
+        result = await create_plan_review_intents(db, plan, ctx=ctx)
+
+    create_mock.assert_awaited_once()
+    assert result["created_recommendations"] == 1
+    assert result["created_recommendation_ids"] == [str(created_ids[0])]
+    assert result["created_workouts"] == 0
+    assert result["synced_success"] == 0

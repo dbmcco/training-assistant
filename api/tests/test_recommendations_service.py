@@ -1,5 +1,5 @@
 from datetime import date
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 from uuid import uuid4
 
 import pytest
@@ -41,6 +41,7 @@ async def test_approve_recommendation_refreshes_calendar_after_successful_writeb
         status="planned",
     )
     db = AsyncMock()
+    db.add = Mock()
 
     with (
         patch.object(settings, "plan_ownership_mode", "assistant"),
@@ -105,6 +106,7 @@ async def test_approve_recommendation_skips_calendar_refresh_when_writeback_fail
         },
     )
     db = AsyncMock()
+    db.add = Mock()
 
     with (
         patch(
@@ -243,6 +245,7 @@ async def test_approve_recommendation_hydrates_missing_workout_steps_and_descrip
         status="upcoming",
     )
     db = AsyncMock()
+    db.add = Mock()
 
     with (
         patch.object(settings, "plan_ownership_mode", "assistant"),
@@ -298,6 +301,7 @@ async def test_synced_unverified_triggers_calendar_refresh():
         },
     )
     db = AsyncMock()
+    db.add = Mock()
 
     with (
         patch(
@@ -485,4 +489,69 @@ async def test_failed_writeback_does_not_update_garmin_workout_id():
     assert updated.garmin_sync_status == "failed"
     assert assistant_entry.garmin_workout_id == "run-old-333"
     assert assistant_entry.garmin_sync_status == "failed"
+    db.flush.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_approve_recommendation_without_existing_target_creates_local_workout():
+    rec = RecommendationChange(
+        id=uuid4(),
+        status="pending",
+        workout_date=date(2026, 5, 6),
+        recommendation_text="Add recovery swim after race weekend.",
+        proposed_workout={
+            "workout_date": "2026-05-06",
+            "discipline": "swim",
+            "workout_type": "recovery_swim",
+            "target_duration": 35,
+            "description": "Easy recovery swim",
+        },
+    )
+    added = []
+    db = AsyncMock()
+    db.add = Mock(side_effect=added.append)
+
+    with (
+        patch.object(settings, "plan_ownership_mode", "assistant"),
+        patch(
+            "src.services.recommendations._find_target_workout",
+            AsyncMock(return_value=None),
+        ),
+        patch(
+            "src.services.recommendations._load_assistant_entry_for_workout",
+            AsyncMock(return_value=None),
+        ),
+        patch(
+            "src.services.recommendations.write_recommendation_change",
+            AsyncMock(
+                return_value={
+                    "status": "success",
+                    "verification_status": "success",
+                    "workout_id": "swim-created-123",
+                }
+            ),
+        ),
+        patch(
+            "src.services.recommendations.refresh_garmin_daily_data_on_demand",
+            AsyncMock(return_value={"status": "success"}),
+        ),
+    ):
+        updated = await decide_recommendation(
+            db,
+            recommendation=rec,
+            decision="approved",
+            note="approved",
+        )
+
+    created_workouts = [item for item in added if isinstance(item, PlannedWorkout)]
+    assert len(created_workouts) == 1
+    created = created_workouts[0]
+    assert created.date == date(2026, 5, 6)
+    assert created.discipline == "swim"
+    assert created.workout_type == "recovery_swim"
+    assert created.target_duration == 35
+    assert created.status == "modified"
+    assert updated.planned_workout_id == created.id
+    assert updated.garmin_sync_status == "success"
+    assert any(getattr(item, "planned_workout_id", None) == created.id for item in added)
     db.flush.assert_awaited()
