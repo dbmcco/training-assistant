@@ -24,6 +24,7 @@ from src.db.models import (
     Race,
     RecommendationChange,
 )
+from src.model_routes import default_coach_model
 from src.services.analytics import (
     _classify_discipline,
     weekly_volume_by_discipline,
@@ -433,7 +434,7 @@ async def generate_intelligent_plan(
     system_prompt, user_prompt = build_planning_prompt(ctx)
 
     client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
-    model = getattr(settings, "coach_model", None) or "claude-sonnet-4-6"
+    model = getattr(settings, "coach_model", None) or default_coach_model()
 
     response = await client.messages.create(
         model=model,

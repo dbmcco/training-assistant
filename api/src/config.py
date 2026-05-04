@@ -1,4 +1,7 @@
+from pydantic import Field
 from pydantic_settings import BaseSettings
+
+from src.model_routes import default_coach_model
 
 
 class Settings(BaseSettings):
@@ -12,7 +15,7 @@ class Settings(BaseSettings):
     db_pool_timeout_seconds: float = 10.0
     db_pool_recycle_seconds: int = 1800
     anthropic_api_key: str = ""
-    coach_model: str = "claude-sonnet-4-6"
+    coach_model: str = Field(default_factory=default_coach_model)
     coach_prompt_history_messages: int = 8
     coach_memory_enabled: bool = True
     coach_memory_retrieval_limit: int = 6
