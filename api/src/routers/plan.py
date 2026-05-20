@@ -208,6 +208,7 @@ async def assistant_generate_plan(
     days_ahead: int = Query(default=14, ge=3, le=56),
     overwrite: bool = Query(default=True),
     sync_to_garmin: bool = Query(default=True),
+    intelligent: bool = Query(default=True, description="Use AI-driven plan generation"),
     db: AsyncSession = Depends(get_db),
 ):
     if not is_assistant_owned_mode():
@@ -217,13 +218,19 @@ async def assistant_generate_plan(
         )
 
     try:
-        result = await generate_assistant_plan(
-            db,
-            days_ahead=days_ahead,
-            overwrite=overwrite,
-            sync_to_garmin=sync_to_garmin,
-        )
-        await db.commit()
+        if intelligent:
+            from src.services.plan_intelligence import run_intelligent_plan_generation
+            result = await run_intelligent_plan_generation(
+                db, sync_to_garmin=sync_to_garmin,
+            )
+        else:
+            result = await generate_assistant_plan(
+                db,
+                days_ahead=days_ahead,
+                overwrite=overwrite,
+                sync_to_garmin=sync_to_garmin,
+            )
+            await db.commit()
         return result
     except ValueError as exc:
         await db.rollback()

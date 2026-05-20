@@ -73,17 +73,18 @@ export async function refreshDashboardData(options?: {
   return res.json()
 }
 
-export async function fetchDashboardWeekly(): Promise<DashboardWeekly> {
-  const res = await fetchWithTimeout(`${BASE}/dashboard/weekly`)
+export async function fetchDashboardWeekly(days = 7): Promise<DashboardWeekly> {
+  const res = await fetchWithTimeout(`${BASE}/dashboard/weekly?days=${days}`)
   if (!res.ok) throw new Error(`Weekly dashboard fetch failed: ${res.status}`)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const raw: any = await res.json()
 
   const volume = Object.entries(raw.volume ?? {}).map(([discipline, val]) => {
-    const v = val as { hours?: number; distance_km?: number; count?: number }
+    const v = val as { hours?: number; training_effect?: number; distance_km?: number; count?: number }
     return {
       discipline,
       duration_minutes: Math.round((v.hours ?? 0) * 60),
+      training_effect: v.training_effect ?? 0,
       distance_km: v.distance_km ?? 0,
       count: v.count ?? 0,
     }
@@ -95,6 +96,15 @@ export async function fetchDashboardWeekly(): Promise<DashboardWeekly> {
     completed: adh.completed ?? 0,
     strict_completed: adh.strict_completed ?? adh.completed ?? 0,
     aligned_substitutions: adh.aligned_substitutions ?? 0,
+    same_day_substitutions: adh.same_day_substitutions ?? adh.aligned_substitutions ?? 0,
+    shifted_substitutions: adh.shifted_substitutions ?? 0,
+    detail_compliance_pct: adh.detail_compliance_pct ?? 0,
+    completed_detail_compliance_pct: adh.completed_detail_compliance_pct ?? 0,
+    high_fidelity_completed: adh.high_fidelity_completed ?? 0,
+    low_fidelity_completed: adh.low_fidelity_completed ?? 0,
+    duration_match_pct: adh.duration_match_pct ?? 0,
+    distance_match_pct: adh.distance_match_pct ?? null,
+    on_schedule_pct: adh.on_schedule_pct ?? 0,
     due_total: adh.due_planned ?? adh.total_planned ?? adh.total ?? 0,
     pending_future: adh.pending_future ?? 0,
     missed: adh.missed ?? 0,
@@ -161,6 +171,16 @@ export async function fetchPlanAdherence(
     completed: raw.completed ?? 0,
     strict_completed: raw.strict_completed ?? raw.completed ?? 0,
     aligned_substitutions: raw.aligned_substitutions ?? 0,
+    same_day_substitutions:
+      raw.same_day_substitutions ?? raw.aligned_substitutions ?? 0,
+    shifted_substitutions: raw.shifted_substitutions ?? 0,
+    detail_compliance_pct: raw.detail_compliance_pct ?? 0,
+    completed_detail_compliance_pct: raw.completed_detail_compliance_pct ?? 0,
+    high_fidelity_completed: raw.high_fidelity_completed ?? 0,
+    low_fidelity_completed: raw.low_fidelity_completed ?? 0,
+    duration_match_pct: raw.duration_match_pct ?? 0,
+    distance_match_pct: raw.distance_match_pct ?? null,
+    on_schedule_pct: raw.on_schedule_pct ?? 0,
     due_total: raw.due_planned ?? raw.total_planned ?? raw.total ?? 0,
     pending_future: raw.pending_future ?? 0,
     missed: raw.missed ?? 0,

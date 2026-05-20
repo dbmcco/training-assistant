@@ -8,7 +8,7 @@
     <array>
         <string>/bin/zsh</string>
         <string>-lc</string>
-        <string>cd "$HOME/projects/experiments/training-assistant/api" &amp;&amp; exec "$HOME/projects/experiments/training-assistant/api/.venv/bin/uvicorn" src.main:app --host 0.0.0.0 --port 8000 --workers 2</string>
+        <string>cd "$HOME/projects/experiments/training-assistant/api" &amp;&amp; exec "$HOME/projects/experiments/training-assistant/api/.venv/bin/uvicorn" src.main:app --host 0.0.0.0 --port 8001 --workers 2</string>
     </array>
     <key>RunAtLoad</key>
     <true/>

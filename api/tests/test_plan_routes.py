@@ -185,7 +185,7 @@ async def test_assistant_generate_plan_success(monkeypatch):
     ) as client:
         resp = await client.post(
             "/api/v1/plan/assistant/generate",
-            params={"days_ahead": 14, "overwrite": "true", "sync_to_garmin": "true"},
+            params={"days_ahead": 14, "overwrite": "true", "sync_to_garmin": "true", "intelligent": "false"},
         )
     assert resp.status_code == 200
     data = resp.json()

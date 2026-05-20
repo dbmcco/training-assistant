@@ -4,6 +4,8 @@
 **Status:** Approved
 **Author:** Braydon + Claude
 
+**Updated:** 2026-03-09 — Added recommendation pipeline, assistant plan, coach memory, plan changes, and Garmin writeback sections.
+
 ## Vision
 
 A long-term personal training coach that learns about you over time. Current focus is half iron man training with multiple scheduled races, but the system grows into a comprehensive fitness coach. API-first architecture — the API is the product, frontends are consumers.
@@ -446,3 +448,71 @@ BRIEFING_ENABLED=true
 - Agent: Mock tool responses, verify correct tool selection
 - Web: Vitest + React Testing Library
 - Integration: API tests against real DB with test data
+
+## Recommendation Pipeline (Added Post-Launch)
+
+The coach uses a two-step intent/approval flow for plan changes:
+
+1. Coach calls `create_plan_change_intent` — creates a `recommendation_changes` row with status=pending
+2. Athlete reviews via UI buttons (Approve/Reject/Request Changes) or chat text
+3. On approval, `decide_recommendation` applies changes to `planned_workouts`, builds a Garmin workout payload, and calls `garmin_writeback.py` to push to Garmin Connect
+4. Calendar refresh is triggered after successful writeback
+
+### New Tables
+
+```sql
+recommendation_changes (
+  id uuid, source text, source_ref_id uuid,
+  planned_workout_id uuid FK, workout_date date,
+  recommendation_text text, proposed_workout jsonb,
+  status text (pending/approved/rejected/changes_requested),
+  decision_notes text, requested_changes text,
+  garmin_sync_status text, garmin_sync_payload jsonb, garmin_sync_result jsonb,
+  training_impact_log jsonb,
+  created_at, decided_at, applied_at
+)
+
+assistant_plan_entries (
+  id uuid, planned_workout_id uuid FK,
+  plan_generation_id uuid, generation_params jsonb,
+  garmin_workout_id text, garmin_sync_status text, garmin_sync_result jsonb,
+  created_at, updated_at
+)
+
+coach_memories (
+  id uuid, conversation_id uuid, source_message_id uuid,
+  role text, content text, embedding vector(1536),
+  created_at
+)
+```
+
+## Assistant Plan Mode (Added Post-Launch)
+
+When `PLAN_OWNERSHIP_MODE=assistant`:
+- Coach generates rolling multi-day plans via `build_assistant_plan`
+- Workouts are written to `planned_workouts` + `assistant_plan_entries`
+- Near-term sessions sync to Garmin via writeback
+- On dashboard refresh, Garmin calendar sync is skipped (assistant owns the plan)
+- Approved recommendation changes persist through future plan regenerations
+
+## New API Routes (Added Post-Launch)
+
+```
+POST   /api/v1/recommendations/{id}/decision    # Approve/reject recommendation
+GET    /api/v1/recommendations                   # List recommendations
+GET    /api/v1/recommendations/{id}              # Get recommendation detail
+POST   /api/v1/plan/assistant/generate           # Generate assistant plan
+GET    /api/v1/plan/activities                   # Plan activities (merged view)
+GET    /api/v1/plan/changes                      # Recent plan change events
+POST   /api/v1/dashboard/refresh                 # On-demand Garmin refresh
+POST   /api/v1/briefings/generate                # Generate daily briefing
+GET    /api/v1/conversations                     # List conversations
+GET    /api/v1/conversations/{id}                # Conversation with paginated history
+```
+
+## Garmin Writeback (Added Post-Launch)
+
+- `garmin_writeback.py` shells out to garmin-connect-sync to create/replace workouts
+- Supports structured workout steps (warmup, intervals, cooldown)
+- Deduplicates by title+date before creating
+- Can replace existing Garmin workout by ID

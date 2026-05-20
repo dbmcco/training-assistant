@@ -145,9 +145,9 @@ async def weekly_volume_by_discipline(
     start: date,
     end: date,
 ) -> dict[str, dict[str, float]]:
-    """Aggregate training volume by discipline for a date range.
+    """Aggregate training volume by discipline for a rolling date range.
 
-    Returns: {"run": {"hours": 3.5, "distance_km": 28.0}, "bike": {...}, ...}
+    Returns: {"run": {"hours": 3.5, "training_effect": 12.4, "distance_km": 28.0}, ...}
     """
     start_dt = datetime(start.year, start.month, start.day, tzinfo=timezone.utc)
     end_dt = datetime(end.year, end.month, end.day, tzinfo=timezone.utc) + timedelta(days=1)
@@ -157,6 +157,8 @@ async def weekly_volume_by_discipline(
             GarminActivity.activity_type,
             func.sum(GarminActivity.duration_seconds).label("total_seconds"),
             func.sum(GarminActivity.distance_meters).label("total_meters"),
+            func.sum(GarminActivity.aerobic_training_effect).label("total_aerobic_te"),
+            func.sum(GarminActivity.anaerobic_training_effect).label("total_anaerobic_te"),
             func.count().label("count"),
         )
         .where(
@@ -172,14 +174,16 @@ async def weekly_volume_by_discipline(
     for row in result:
         discipline = _classify_discipline(row.activity_type)
         if discipline not in volumes:
-            volumes[discipline] = {"hours": 0.0, "distance_km": 0.0, "count": 0}
+            volumes[discipline] = {"hours": 0.0, "training_effect": 0.0, "distance_km": 0.0, "count": 0}
         volumes[discipline]["hours"] += (row.total_seconds or 0) / 3600.0
+        volumes[discipline]["training_effect"] += (row.total_aerobic_te or 0.0) + (row.total_anaerobic_te or 0.0)
         volumes[discipline]["distance_km"] += (row.total_meters or 0) / 1000.0
         volumes[discipline]["count"] += row.count
 
     # Round for cleanliness
     for d in volumes.values():
         d["hours"] = round(d["hours"], 1)
+        d["training_effect"] = round(d["training_effect"], 1)
         d["distance_km"] = round(d["distance_km"], 1)
 
     return volumes

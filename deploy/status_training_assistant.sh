@@ -33,14 +33,14 @@ launchctl print "gui/$UID_NUM/$API_LABEL" 2>/dev/null | rg 'state =|pid =|last e
 launchctl print "gui/$UID_NUM/$WEB_LABEL" 2>/dev/null | rg 'state =|pid =|last exit code' || true
 
 printf '\n[status] listeners\n'
-lsof -nP -iTCP:8000 -sTCP:LISTEN || true
+lsof -nP -iTCP:8001 -sTCP:LISTEN || true
 lsof -nP -iTCP:4100 -sTCP:LISTEN || true
 
 printf '\n[status] health checks\n'
-printf '8000 /health -> %s\n' "$(status_probe 'http://127.0.0.1:8000/health')"
-printf '8000 /health/ready -> %s\n' "$(status_probe 'http://127.0.0.1:8000/health/ready')"
-printf '8000 /api/v1/dashboard/today -> %s\n' "$(status_probe 'http://127.0.0.1:8000/api/v1/dashboard/today')"
-printf '8000 /api/v1/dashboard/weekly -> %s\n' "$(status_probe 'http://127.0.0.1:8000/api/v1/dashboard/weekly')"
+printf '8001 /health -> %s\n' "$(status_probe 'http://127.0.0.1:8001/health')"
+printf '8001 /health/ready -> %s\n' "$(status_probe 'http://127.0.0.1:8001/health/ready')"
+printf '8001 /api/v1/dashboard/today -> %s\n' "$(status_probe 'http://127.0.0.1:8001/api/v1/dashboard/today')"
+printf '8001 /api/v1/dashboard/weekly -> %s\n' "$(status_probe 'http://127.0.0.1:8001/api/v1/dashboard/weekly')"
 printf '4100 / -> %s\n' "$(status_probe 'http://127.0.0.1:4100/')"
 printf '4100 /api/v1/dashboard/today -> %s\n' "$(status_probe 'http://127.0.0.1:4100/api/v1/dashboard/today')"
 printf '4100 /api/v1/dashboard/weekly -> %s\n' "$(status_probe 'http://127.0.0.1:4100/api/v1/dashboard/weekly')"

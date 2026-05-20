@@ -17,7 +17,7 @@ export default defineConfig({
     port: 4100,
     allowedHosts,
     proxy: {
-      '/api': 'http://127.0.0.1:8000',
+      '/api': 'http://127.0.0.1:8001',
     },
   },
   preview: {
@@ -25,7 +25,7 @@ export default defineConfig({
     port: 4100,
     allowedHosts,
     proxy: {
-      '/api': 'http://127.0.0.1:8000',
+      '/api': 'http://127.0.0.1:8001',
     },
   },
 })

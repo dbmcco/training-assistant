@@ -72,6 +72,29 @@ Briefing behavior:
 - Separates headline, readiness summary, workout recommendation, and alerts
 - Produces structured recommendation-change payloads when workout edits are warranted
 
+## Recommendation Pipeline
+
+When the coach suggests a plan change, it creates a structured intent
+(`create_plan_change_intent`). The athlete can approve or reject via chat or
+UI buttons. On approval, the change is applied to the `planned_workouts` table
+and synced back to Garmin Connect. The UI shows Approve / Reject / Request
+Changes buttons on pending recommendations.
+
+## Coach Memory
+
+The coach has long-term memory via PG vector embeddings. Key conversation
+insights are automatically extracted and stored. On each new message, relevant
+memories are retrieved via semantic search and injected into the system prompt.
+This means the coach learns about the athlete over time — injury history,
+preferences, patterns.
+
+## Assistant-Owned Plan Generation
+
+In assistant mode (`PLAN_OWNERSHIP_MODE=assistant`), the coach can generate a
+full rolling training plan via the `build_assistant_plan` tool. Generated
+workouts are synced to Garmin Connect. The plan respects race dates,
+periodization phase, current load, and recovery state.
+
 ## Screenshots
 
 All screenshots below are sanitized/redacted sample views (no personal metrics,
@@ -229,6 +252,13 @@ Web production build:
 ```bash
 cd web
 npm run build
+```
+
+Restart API service (picks up .env changes):
+
+```bash
+# Restart API service (picks up .env changes)
+launchctl kickstart -k gui/$(id -u)/com.training.api
 ```
 
 ## Local Service Scripts (macOS)

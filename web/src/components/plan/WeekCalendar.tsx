@@ -58,8 +58,10 @@ function formatDuration(rawDuration: number | null): string {
   return m > 0 ? `${h}h ${m}m` : `${h}h`
 }
 
-function prettyLabel(value: string | null | undefined): string {
+function prettyLabel(value: string | number | null | undefined): string {
   if (!value) return '-'
+  if (typeof value === 'number') return `Zone ${value}`
+  if (/^\d+$/.test(value)) return `Zone ${value}`
   return value.replace(/_/g, ' ')
 }
 

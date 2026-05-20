@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   fetchDashboardToday,
@@ -12,6 +12,7 @@ import RaceCountdown from '../components/dashboard/RaceCountdown'
 import WeeklyVolume from '../components/dashboard/WeeklyVolume'
 import LoadTrend from '../components/dashboard/LoadTrend'
 import AlertsList from '../components/dashboard/AlertsList'
+import TimeframeSelector from '../components/dashboard/TimeframeSelector'
 
 function SkeletonCard({ className = '' }: { className?: string }) {
   return (
@@ -28,6 +29,7 @@ function SkeletonCard({ className = '' }: { className?: string }) {
 export default function Dashboard() {
   const queryClient = useQueryClient()
   const hasTriggeredRefreshRef = useRef(false)
+  const [days, setDays] = useState(7)
 
   const refreshMutation = useMutation({
     mutationFn: () => refreshDashboardData(),
@@ -49,8 +51,8 @@ export default function Dashboard() {
   })
 
   const weekly = useQuery({
-    queryKey: ['dashboard', 'weekly'],
-    queryFn: fetchDashboardWeekly,
+    queryKey: ['dashboard', 'weekly', days],
+    queryFn: () => fetchDashboardWeekly(days),
   })
 
   if (today.isLoading) {
@@ -103,13 +105,14 @@ export default function Dashboard() {
 
         {/* Right column */}
         <div className="space-y-6">
+          <TimeframeSelector days={days} onChange={setDays} />
           {weekly.isError ? (
             <div className="rounded-xl bg-red-500/10 border border-red-500/20 p-5 text-sm text-red-300">
-              Could not load weekly volume and load trend.
+              Could not load volume and load trend.
             </div>
           ) : weekly.data ? (
             <>
-              <WeeklyVolume volume={weekly.data.volume} />
+              <WeeklyVolume volume={weekly.data.volume} days={days} />
               <LoadTrend loadTrend={weekly.data.load_trend} />
             </>
           ) : weekly.isLoading ? (

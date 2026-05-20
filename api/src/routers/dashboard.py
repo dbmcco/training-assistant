@@ -1,13 +1,19 @@
 """Dashboard API routes for the Training Assistant."""
 
-from datetime import date, timedelta
+from datetime import date, datetime, timezone, timedelta
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db.connection import get_db
-from src.db.models import DailyBriefing, GarminDailySummary, PlannedWorkout, Race
+from src.db.models import (
+    AssistantPlanEntry,
+    DailyBriefing,
+    GarminDailySummary,
+    PlannedWorkout,
+    Race,
+)
 from src.services.analytics import (
     activity_stats,
     activity_type_breakdown,
@@ -21,6 +27,10 @@ from src.services.analytics import (
     training_load_trend,
     weekly_volume_by_discipline,
 )
+from src.services.assistant_plan import (
+    assistant_plan_table_available,
+    is_assistant_owned_mode,
+)
 from src.services.plan_engine import (
     get_plan_adherence,
     get_today_workout,
@@ -32,7 +42,44 @@ from src.services.recommendations import (
     get_briefing_recommendation,
     serialize_recommendation,
 )
-from src.services.workout_duration import format_planned_duration
+from src.services.workout_duration import (
+    format_planned_duration,
+    normalize_planned_duration_minutes,
+    planned_duration_seconds,
+)
+
+
+def _workout_dedupe_key(workout: PlannedWorkout) -> tuple:
+    return (
+        workout.date,
+        (workout.discipline or "").strip().lower(),
+        (workout.workout_type or "").strip().lower(),
+        (workout.description or "").strip().lower(),
+        int(
+            normalize_planned_duration_minutes(workout.target_duration)
+            or (planned_duration_seconds(workout.target_duration) or 0) / 60.0
+        ),
+        round(float(workout.target_distance or 0.0), 3),
+    )
+
+
+def _dedupe_planned_workouts(workouts: list[PlannedWorkout]) -> list[PlannedWorkout]:
+    deduped: dict[tuple, PlannedWorkout] = {}
+    for workout in workouts:
+        key = _workout_dedupe_key(workout)
+        existing = deduped.get(key)
+        if existing is None:
+            deduped[key] = workout
+            continue
+        existing_created = existing.created_at or datetime.min.replace(
+            tzinfo=timezone.utc
+        )
+        current_created = workout.created_at or datetime.min.replace(
+            tzinfo=timezone.utc
+        )
+        if current_created >= existing_created:
+            deduped[key] = workout
+    return sorted(deduped.values(), key=lambda workout: workout.date or date.min)
 
 router = APIRouter(prefix="/api/v1/dashboard", tags=["dashboard"])
 
@@ -218,16 +265,21 @@ async def dashboard_today(db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/weekly")
-async def dashboard_weekly(db: AsyncSession = Depends(get_db)):
-    """Return this week's training summary: volume, adherence, load trend."""
+async def dashboard_weekly(
+    days: int = Query(default=7, ge=7, le=365, description="Rolling window in days"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return rolling training summary: volume, adherence, load trend."""
     today = date.today()
-    monday = today - timedelta(days=today.weekday())
+    rolling_start = today - timedelta(days=days - 1)
+    load_weeks = max(days // 7, 4)
 
-    volume = await weekly_volume_by_discipline(db, monday, today)
-    adherence = await get_plan_adherence(db, monday, today)
-    load = await training_load_trend(db, weeks=4)
+    volume = await weekly_volume_by_discipline(db, rolling_start, today)
+    adherence = await get_plan_adherence(db, rolling_start, today)
+    load = await training_load_trend(db, weeks=load_weeks)
 
     return {
+        "days": days,
         "volume": volume,
         "adherence": adherence,
         "load_trend": load,
@@ -293,7 +345,7 @@ async def dashboard_trends(
     )
 
     async def _load_plan_window(window_start: date, window_end: date) -> list[PlannedWorkout]:
-        window_result = await db.execute(
+        query = (
             select(PlannedWorkout)
             .where(
                 and_(
@@ -303,7 +355,100 @@ async def dashboard_trends(
             )
             .order_by(PlannedWorkout.date.asc())
         )
-        return list(window_result.scalars().all())
+        if is_assistant_owned_mode():
+            if not await assistant_plan_table_available(db):
+                return []
+            query = query.join(
+                AssistantPlanEntry,
+                AssistantPlanEntry.planned_workout_id == PlannedWorkout.id,
+            )
+        window_result = await db.execute(query)
+        return _dedupe_planned_workouts(list(window_result.scalars().all()))
+
+    async def _build_window_review(window_start: date, window_end: date) -> dict:
+        window_volume = await weekly_volume_by_discipline(db, window_start, window_end)
+        window_stats = await activity_stats(db, window_start, window_end)
+        window_analysis = await coaching_analysis(
+            db, window_start, window_end, window_volume, window_stats
+        )
+        window_adherence = await get_plan_adherence(db, window_start, window_end)
+        insights = list(window_analysis.get("insights", []))
+        primary_insight = insights[0]["title"] if insights else "No major alert in this window."
+        return {
+            "start": window_start.isoformat(),
+            "end": window_end.isoformat(),
+            "sessions_completed": int(window_stats.get("total_activities", 0)),
+            "hours_completed": round(float(window_stats.get("total_hours", 0.0)), 1),
+            "active_days": int(window_analysis.get("consistency", {}).get("active_days", 0)),
+            "planned_due": int(window_adherence.get("due_planned", 0)),
+            "on_plan": int(window_adherence.get("completed", 0)),
+            "adherence_pct": float(window_adherence.get("completion_pct", 0.0)),
+            "shifted_substitutions": int(
+                window_adherence.get("shifted_substitutions", 0)
+            ),
+            "headline": primary_insight,
+        }
+
+    async def _build_forward_view(anchor: date) -> dict:
+        forward_start = anchor
+        forward_end = anchor + timedelta(days=6)
+        window_workouts = await _load_plan_window(forward_start, forward_end)
+        upcoming_workouts = [
+            workout
+            for workout in window_workouts
+            if (workout.status or "").strip().lower() in {"upcoming", "modified"}
+        ]
+
+        discipline_totals: dict[str, dict[str, float | int]] = {}
+        planned_minutes_total = 0.0
+        key_sessions: list[dict] = []
+        for workout in upcoming_workouts:
+            discipline = (workout.discipline or "other").strip().lower() or "other"
+            duration_minutes = float(
+                normalize_planned_duration_minutes(workout.target_duration) or 0.0
+            )
+            planned_minutes_total += duration_minutes
+
+            bucket = discipline_totals.setdefault(
+                discipline, {"discipline": discipline, "count": 0, "hours": 0.0}
+            )
+            bucket["count"] = int(bucket["count"]) + 1
+            bucket["hours"] = float(bucket["hours"]) + (duration_minutes / 60.0)
+
+            if len(key_sessions) < 7:
+                key_sessions.append(
+                    {
+                        "date": workout.date.isoformat(),
+                        "discipline": discipline,
+                        "status": workout.status,
+                        "label": (
+                            f"{discipline} {workout.workout_type or workout.description or 'session'} "
+                            f"{format_planned_duration(workout.target_duration)}"
+                        ).strip(),
+                        "duration": format_planned_duration(workout.target_duration),
+                    }
+                )
+
+        sorted_disciplines = sorted(
+            [
+                {
+                    "discipline": key,
+                    "count": int(value["count"]),
+                    "hours": round(float(value["hours"]), 1),
+                }
+                for key, value in discipline_totals.items()
+            ],
+            key=lambda item: (-item["hours"], item["discipline"]),
+        )
+
+        return {
+            "start": forward_start.isoformat(),
+            "end": forward_end.isoformat(),
+            "planned_sessions": len(upcoming_workouts),
+            "planned_hours": round(planned_minutes_total / 60.0, 1),
+            "disciplines": sorted_disciplines,
+            "key_sessions": key_sessions,
+        }
 
     today_anchor = requested_end or date.today()
     week_start = today_anchor - timedelta(days=today_anchor.weekday())
@@ -341,6 +486,14 @@ async def dashboard_trends(
         "remaining": max(0, len(week_workouts) - int(week_adherence.get("completed", 0))),
         "next_sessions": next_sessions,
     }
+    today_view = date.today()
+    rolling_5d_start = today_view - timedelta(days=4)
+    week_to_date_start = today_view - timedelta(days=today_view.weekday())
+    review_windows = {
+        "rolling_5d": await _build_window_review(rolling_5d_start, today_view),
+        "week_to_date": await _build_window_review(week_to_date_start, today_view),
+        "forward_7d": await _build_forward_view(today_view),
+    }
     latest_summary_result = await db.execute(
         select(GarminDailySummary)
         .order_by(GarminDailySummary.calendar_date.desc())
@@ -373,4 +526,5 @@ async def dashboard_trends(
         "coach_summary": coach_summary,
         "executive_summary": executive_summary,
         "plan_week": plan_week,
+        "review_windows": review_windows,
     }

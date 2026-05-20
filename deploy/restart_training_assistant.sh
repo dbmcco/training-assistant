@@ -37,10 +37,10 @@ kickstart_label() {
 
 start_api_fallback() {
   log "starting API fallback process"
-  quiet pkill -f '/training-assistant/api/.venv/bin/uvicorn src.main:app --host 0.0.0.0 --port 8000 --workers 2' || true
+  quiet pkill -f '/training-assistant/api/.venv/bin/uvicorn src.main:app --host 0.0.0.0 --port 8001 --workers 2' || true
   (
     cd "$ROOT_DIR/api"
-    nohup ./.venv/bin/uvicorn src.main:app --host 0.0.0.0 --port 8000 --workers 2 >/tmp/training-api.log 2>/tmp/training-api.err &
+    nohup ./.venv/bin/uvicorn src.main:app --host 0.0.0.0 --port 8001 --workers 2 >/tmp/training-api.log 2>/tmp/training-api.err &
   )
 }
 
@@ -128,7 +128,7 @@ show_diag() {
   log "launchctl status"
   launchctl list | rg 'com\\.training\\.(api|web)' || true
   log "listening ports"
-  lsof -nP -iTCP:8000 -sTCP:LISTEN || true
+  lsof -nP -iTCP:8001 -sTCP:LISTEN || true
   lsof -nP -iTCP:4100 -sTCP:LISTEN || true
   log "recent logs"
   tail -n 40 /tmp/training-api.err || true
@@ -150,14 +150,14 @@ load_label "$API_LABEL" "$API_PLIST_DST"
 load_label "$WEB_LABEL" "$WEB_PLIST_DST"
 
 log "waiting for API liveness"
-if ! wait_http_ok "http://127.0.0.1:8000/health" 40; then
+if ! wait_http_ok "http://127.0.0.1:8001/health" 40; then
   log "API liveness failed first check, kickstarting once more"
   kickstart_label "$API_LABEL"
   sleep 2
-  if ! wait_http_ok "http://127.0.0.1:8000/health" 40; then
+  if ! wait_http_ok "http://127.0.0.1:8001/health" 40; then
     start_api_fallback
     sleep 2
-    if ! wait_http_ok "http://127.0.0.1:8000/health" 30; then
+    if ! wait_http_ok "http://127.0.0.1:8001/health" 30; then
       log "API failed liveness check"
       show_diag
       exit 1
@@ -166,14 +166,14 @@ if ! wait_http_ok "http://127.0.0.1:8000/health" 40; then
 fi
 
 log "waiting for API readiness (DB + warmup)"
-if ! wait_http_stable "http://127.0.0.1:8000/health/ready" 60 2; then
+if ! wait_http_stable "http://127.0.0.1:8001/health/ready" 60 2; then
   log "API readiness failed first check, kickstarting once more"
   kickstart_label "$API_LABEL"
   sleep 2
-  if ! wait_http_stable "http://127.0.0.1:8000/health/ready" 60 2; then
+  if ! wait_http_stable "http://127.0.0.1:8001/health/ready" 60 2; then
     start_api_fallback
     sleep 2
-    if ! wait_http_stable "http://127.0.0.1:8000/health/ready" 45 2; then
+    if ! wait_http_stable "http://127.0.0.1:8001/health/ready" 45 2; then
       log "API readiness still failing"
       show_diag
       exit 1
@@ -182,12 +182,12 @@ if ! wait_http_stable "http://127.0.0.1:8000/health/ready" 60 2; then
 fi
 
 log "warming API data routes"
-curl -sS -m "$CURL_TIMEOUT" -o /dev/null "http://127.0.0.1:8000/api/v1/dashboard/today" || true
-curl -sS -m "$CURL_TIMEOUT" -o /dev/null "http://127.0.0.1:8000/api/v1/dashboard/weekly" || true
-curl -sS -m "$CURL_TIMEOUT" -o /dev/null "http://127.0.0.1:8000/api/v1/dashboard/trends?metric=readiness" || true
+curl -sS -m "$CURL_TIMEOUT" -o /dev/null "http://127.0.0.1:8001/api/v1/dashboard/today" || true
+curl -sS -m "$CURL_TIMEOUT" -o /dev/null "http://127.0.0.1:8001/api/v1/dashboard/weekly" || true
+curl -sS -m "$CURL_TIMEOUT" -o /dev/null "http://127.0.0.1:8001/api/v1/dashboard/trends?metric=readiness" || true
 
 log "waiting for API dashboard payload"
-if ! wait_http_stable "http://127.0.0.1:8000/api/v1/dashboard/today" 60 2; then
+if ! wait_http_stable "http://127.0.0.1:8001/api/v1/dashboard/today" 60 2; then
   log "API dashboard endpoint still unstable after warmup"
   show_diag
   exit 1

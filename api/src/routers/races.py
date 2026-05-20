@@ -4,11 +4,11 @@ from datetime import date, datetime, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db.connection import get_db
-from src.db.models import Race
+from src.db.models import Race, TrainingPlan
 
 router = APIRouter(prefix="/api/v1/races", tags=["races"])
 
@@ -76,6 +76,12 @@ async def delete_race(race_id: UUID, db: AsyncSession = Depends(get_db)):
     if not race:
         raise HTTPException(status_code=404, detail="Race not found")
 
+    # Detach training plans that reference this race before deleting
+    await db.execute(
+        update(TrainingPlan)
+        .where(TrainingPlan.race_id == race_id)
+        .values(race_id=None)
+    )
     await db.delete(race)
     await db.commit()
     return {"deleted": True}

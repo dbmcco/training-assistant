@@ -77,6 +77,15 @@ export default function WorkoutCard({ workout, onClick }: WorkoutCardProps) {
     return m > 0 ? `${h}h ${m}m` : `${h}h`
   }
 
+  const formatHrZone = (zone: number | string | null): string => {
+    if (zone == null) return ''
+    if (typeof zone === 'number') return `Zone ${zone}`
+    const value = zone.trim()
+    if (!value) return ''
+    if (/^\d+$/.test(value)) return `Zone ${value}`
+    return value.replace(/_/g, ' ')
+  }
+
   const cardContent = (
     <>
       <div className="flex items-center gap-1.5 mb-1 min-w-0">
@@ -96,7 +105,7 @@ export default function WorkoutCard({ workout, onClick }: WorkoutCardProps) {
           <span>{formatDuration(durationMinutes)}</span>
         )}
         {workout.target_hr_zone != null && (
-          <span className="uppercase">{workout.target_hr_zone.replace(/_/g, ' ')}</span>
+          <span className="uppercase">{formatHrZone(workout.target_hr_zone)}</span>
         )}
       </div>
       {workout.description != null && (

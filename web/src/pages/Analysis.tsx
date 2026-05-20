@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { fetchDashboardTrends } from '../api/client'
 import TrendsStatsPanel from '../components/dashboard/TrendsStatsPanel'
+import ReviewWindowsPanel from '../components/dashboard/ReviewWindowsPanel'
 
 export default function Analysis() {
   const [trendMetric, setTrendMetric] = useState('readiness')
@@ -82,6 +83,12 @@ export default function Analysis() {
           </ul>
         )}
       </div>
+
+      <ReviewWindowsPanel
+        review={trends.data?.review_windows}
+        isLoading={trends.isLoading}
+        isError={trends.isError}
+      />
 
       <TrendsStatsPanel
         trends={trends.data}

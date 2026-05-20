@@ -14,8 +14,10 @@ export interface Readiness {
 
 export interface TodayWorkout {
   discipline: string
-  type: string
+  workout_type: string
+  type?: string
   target_duration: number | null
+  target_distance: number | null
   description: string | null
   status: string
 }
@@ -77,6 +79,7 @@ export interface DashboardToday {
 export interface VolumeEntry {
   discipline: string
   duration_minutes: number
+  training_effect: number
   distance_km: number
   count: number
 }
@@ -86,6 +89,15 @@ export interface Adherence {
   completed: number
   strict_completed?: number
   aligned_substitutions?: number
+  same_day_substitutions?: number
+  shifted_substitutions?: number
+  detail_compliance_pct?: number
+  completed_detail_compliance_pct?: number
+  high_fidelity_completed?: number
+  low_fidelity_completed?: number
+  duration_match_pct?: number
+  distance_match_pct?: number | null
+  on_schedule_pct?: number
   due_total?: number
   pending_future?: number
   missed: number
@@ -169,6 +181,48 @@ export interface PlanWeekSummary {
   }>
 }
 
+export interface ReviewWindowRetrospective {
+  start: string
+  end: string
+  sessions_completed: number
+  hours_completed: number
+  active_days: number
+  planned_due: number
+  on_plan: number
+  adherence_pct: number
+  shifted_substitutions: number
+  headline: string
+}
+
+export interface ReviewWindowForwardDiscipline {
+  discipline: string
+  count: number
+  hours: number
+}
+
+export interface ReviewWindowForwardSession {
+  date: string
+  discipline: string
+  status: string
+  label: string
+  duration: string
+}
+
+export interface ReviewWindowForward {
+  start: string
+  end: string
+  planned_sessions: number
+  planned_hours: number
+  disciplines: ReviewWindowForwardDiscipline[]
+  key_sessions: ReviewWindowForwardSession[]
+}
+
+export interface ReviewWindows {
+  rolling_5d: ReviewWindowRetrospective
+  week_to_date: ReviewWindowRetrospective
+  forward_7d: ReviewWindowForward
+}
+
 export interface CoachInsight {
   level: 'good' | 'watch' | 'warning'
   title: string
@@ -236,7 +290,7 @@ export interface DashboardTrends {
   metric_options: TrendMetricOption[]
   series: TrendSeriesPoint[]
   series_summary: TrendSeriesSummary
-  volume: Record<string, { hours: number; distance_km: number; count: number }>
+  volume: Record<string, { hours: number; training_effect: number; distance_km: number; count: number }>
   activity_types: ActivityTypeStat[]
   stats: {
     total_activities: number
@@ -249,6 +303,7 @@ export interface DashboardTrends {
   coach_summary: TrendCoachSummary | null
   executive_summary: ExecutiveSummary | null
   plan_week: PlanWeekSummary | null
+  review_windows: ReviewWindows | null
 }
 
 export interface Race {
@@ -299,7 +354,7 @@ export interface PlannedWorkout {
   workout_type: string
   target_duration: number | null
   target_distance: number | null
-  target_hr_zone: string | null
+  target_hr_zone: number | string | null
   description: string | null
   status: string
 }
@@ -331,6 +386,9 @@ export interface AssistantPlanGenerationResult {
     discipline: string
     workout_type: string
     target_duration: number | null
+    target_distance: number | null
+    target_hr_zone: number | string | null
+    description: string | null
     status: string
     is_locked: boolean
     garmin_sync_status: string | null

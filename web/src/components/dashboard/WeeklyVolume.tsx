@@ -12,14 +12,10 @@ import {
   CartesianGrid,
 } from 'recharts'
 import type { VolumeEntry } from '../../api/types'
-import {
-  isSwimDiscipline,
-  kilometersToMiles,
-  kilometersToYards,
-} from '../../utils/units'
 
 interface WeeklyVolumeProps {
   volume: VolumeEntry[]
+  days?: number
 }
 
 const disciplineColors: Record<string, string> = {
@@ -38,8 +34,8 @@ function formatDisciplineLabel(discipline: string): string {
     .replace(/\b\w/g, (match) => match.toUpperCase())
 }
 
-export default function WeeklyVolume({ volume }: WeeklyVolumeProps) {
-  const [unit, setUnit] = useState<'minutes' | 'distance'>('minutes')
+export default function WeeklyVolume({ volume, days = 7 }: WeeklyVolumeProps) {
+  const [unit, setUnit] = useState<'minutes' | 'training_effect'>('minutes')
   const [disabledTypes, setDisabledTypes] = useState<Set<string>>(new Set())
 
   const disciplines = useMemo(
@@ -53,21 +49,14 @@ export default function WeeklyVolume({ volume }: WeeklyVolumeProps) {
     [volume, disabledTypes],
   )
 
-  const data = volume.map((v) => {
-    const swim = isSwimDiscipline(v.discipline)
-    return {
-      discipline: formatDisciplineLabel(v.discipline),
-      duration: v.duration_minutes,
-      distance: swim
-        ? Math.round(kilometersToYards(v.distance_km))
-        : Number(kilometersToMiles(v.distance_km).toFixed(1)),
-      distanceUnit: swim ? 'yd' : 'mi',
-      distancePrecision: swim ? 0 : 1,
-      count: v.count,
-      fill: disciplineColors[v.discipline] ?? '#6b7280',
-      key: v.discipline,
-    }
-  })
+  const data = volume.map((v) => ({
+    discipline: formatDisciplineLabel(v.discipline),
+    duration: v.duration_minutes,
+    training_effect: v.training_effect,
+    count: v.count,
+    fill: disciplineColors[v.discipline] ?? '#6b7280',
+    key: v.discipline,
+  }))
 
   const filteredData = data.filter((d) => !disabledTypes.has(d.key))
 
@@ -83,14 +72,14 @@ export default function WeeklyVolume({ volume }: WeeklyVolumeProps) {
     })
   }
 
-  const valueKey = unit === 'minutes' ? 'duration' : 'distance'
-  const axisUnit = unit === 'minutes' ? ' min' : undefined
+  const valueKey = unit === 'minutes' ? 'duration' : 'training_effect'
+  const axisUnit = unit === 'minutes' ? ' min' : ' TE'
 
   return (
     <div className="rounded-xl bg-gray-900 border border-gray-800 p-5">
       <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
         <h3 className="text-sm font-semibold text-gray-400">
-          Weekly Volume
+          {days === 7 ? 'Rolling 7-Day' : `Last ${days}-Day`} Volume
         </h3>
         <div className="inline-flex rounded-md border border-gray-700 overflow-hidden">
           <button
@@ -104,14 +93,14 @@ export default function WeeklyVolume({ volume }: WeeklyVolumeProps) {
             Minutes
           </button>
           <button
-            onClick={() => setUnit('distance')}
+            onClick={() => setUnit('training_effect')}
             className={`px-2.5 py-1 text-xs ${
-              unit === 'distance'
+              unit === 'training_effect'
                 ? 'bg-blue-500/20 text-blue-300'
                 : 'bg-gray-950 text-gray-400 hover:text-gray-200'
             }`}
           >
-            Distance
+            Training Effect
           </button>
         </div>
       </div>
@@ -168,25 +157,15 @@ export default function WeeklyVolume({ volume }: WeeklyVolumeProps) {
                   const v = Number(value as number)
                   const p = props as {
                     payload: {
-                      distance: number
-                      distanceUnit: string
-                      distancePrecision: number
                       duration: number
+                      training_effect: number
                       count: number
                     }
                   }
-                  const distanceText =
-                    p.payload.distancePrecision === 0
-                      ? `${Math.round(p.payload.distance).toLocaleString()} ${p.payload.distanceUnit}`
-                      : `${p.payload.distance.toFixed(1)} ${p.payload.distanceUnit}`
                   if (unit === 'minutes') {
-                    return [`${v} min (${distanceText}, ${p.payload.count} sessions)`, 'Volume']
+                    return [`${v} min (TE ${p.payload.training_effect.toFixed(1)}, ${p.payload.count} sessions)`, 'Volume']
                   }
-                  const valueText =
-                    p.payload.distancePrecision === 0
-                      ? `${Math.round(v).toLocaleString()} ${p.payload.distanceUnit}`
-                      : `${v.toFixed(1)} ${p.payload.distanceUnit}`
-                  return [`${valueText} (${p.payload.duration} min, ${p.payload.count} sessions)`, 'Volume']
+                  return [`TE ${v.toFixed(1)} (${p.payload.duration} min, ${p.payload.count} sessions)`, 'Volume']
                 }}
               />
               <Bar dataKey={valueKey} radius={[0, 4, 4, 0]} />
@@ -195,7 +174,7 @@ export default function WeeklyVolume({ volume }: WeeklyVolumeProps) {
         </div>
       ) : (
         <div className="h-48 rounded-lg border border-gray-800 bg-gray-950/40 flex items-center justify-center text-xs text-gray-500">
-          No activity volume recorded yet this week.
+          No activity volume in the last {days} days.
         </div>
       )}
 

@@ -17,11 +17,13 @@ async def test_weekly_volume_by_discipline():
         start = end - timedelta(days=7)
         result = await weekly_volume_by_discipline(session, start, end)
     assert isinstance(result, dict)
-    # Result should be keyed by discipline with hours and distance
+    # Result should be keyed by discipline with hours, training_effect, and distance
     for discipline, data in result.items():
         assert "hours" in data
+        assert "training_effect" in data
         assert "distance_km" in data
         assert isinstance(data["hours"], (int, float))
+        assert isinstance(data["training_effect"], (int, float))
         assert isinstance(data["distance_km"], (int, float))
 
 

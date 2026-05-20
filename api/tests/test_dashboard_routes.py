@@ -130,6 +130,7 @@ async def test_dashboard_trends_default():
     assert "coach_summary" in data
     assert "executive_summary" in data
     assert "plan_week" in data
+    assert "review_windows" in data
     assert "insights" in data["analysis"]
     executive_summary = data["executive_summary"]
     assert "as_of" in executive_summary
@@ -144,6 +145,23 @@ async def test_dashboard_trends_default():
     assert "on_plan_completed" in plan_week
     assert "remaining" in plan_week
     assert "next_sessions" in plan_week
+    review = data["review_windows"]
+    assert "rolling_5d" in review
+    assert "week_to_date" in review
+    assert "forward_7d" in review
+    rolling = review["rolling_5d"]
+    assert "start" in rolling
+    assert "end" in rolling
+    assert "sessions_completed" in rolling
+    assert "adherence_pct" in rolling
+    assert "headline" in rolling
+    forward = review["forward_7d"]
+    assert "start" in forward
+    assert "end" in forward
+    assert "planned_sessions" in forward
+    assert "planned_hours" in forward
+    assert "disciplines" in forward
+    assert "key_sessions" in forward
 
 
 @pytest.mark.asyncio
