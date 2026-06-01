@@ -81,6 +81,9 @@ async def list_workouts(
     db: AsyncSession = Depends(get_db),
 ):
     query = select(PlannedWorkout).order_by(PlannedWorkout.date)
+    query = query.where(
+        PlannedWorkout.status.in_(["upcoming", "modified", "completed"])
+    )
     if is_assistant_owned_mode():
         if not await assistant_plan_table_available(db):
             return []
