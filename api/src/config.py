@@ -22,6 +22,15 @@ class Settings(BaseSettings):
     coach_memory_backfill_limit_messages: int = 2000
     coach_memory_embedding_dim: int = 256
     cors_origins: list[str] = ["http://localhost:5173"]
+    garmin_integration_enabled: bool = True
+    garmin_tokenstore_path: str = "~/.config/training-assistant/garmin-tokenstore"
+    garmin_sync_lock_path: str = "/tmp/training-assistant-garmin-sync.lock"
+    garmin_sync_days_back: int = 2
+    garmin_calendar_months_ahead: int = 5
+    garmin_sync_timeout_seconds: int = 300
+    peloton_enabled: bool = False
+    peloton_email: str = ""
+    peloton_password: str = ""
     garmin_writeback_enabled: bool = True
     garmin_writeback_repo: str = ""
     garmin_writeback_python: str = ""
