@@ -20,13 +20,9 @@ if config.config_file_name is not None:
 # for 'autogenerate' support
 target_metadata = Base.metadata
 
-# Tables that already exist in the database and must NOT be managed by Alembic
-EXCLUDED_TABLES = {"garmin_activities", "garmin_daily_summary", "athlete_biometrics"}
-
-# Only manage tables defined in our SQLAlchemy models (minus excluded ones)
-MANAGED_TABLES = {
-    table.name for table in Base.metadata.sorted_tables
-} - EXCLUDED_TABLES
+# Garmin-backed tables are now owned by Training Assistant migrations. They are
+# included here so schema drift is visible instead of silently ignored.
+MANAGED_TABLES = {table.name for table in Base.metadata.sorted_tables}
 
 
 def include_name(name, type_, parent_names):

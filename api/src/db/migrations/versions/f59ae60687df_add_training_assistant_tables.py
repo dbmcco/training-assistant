@@ -20,6 +20,85 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     """Upgrade schema."""
+    # These tables historically came from the sibling Garmin sync service.
+    # Create them before activity_details and planned_workouts add foreign keys.
+    # IF NOT EXISTS keeps this historical migration safe on the populated
+    # database where the tables already exist.
+    op.execute("""
+        CREATE TABLE IF NOT EXISTS garmin_activities (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            synced_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            garmin_activity_id BIGINT NOT NULL UNIQUE,
+            name TEXT,
+            activity_type TEXT,
+            sport_type TEXT,
+            start_time TIMESTAMPTZ,
+            distance_meters DOUBLE PRECISION,
+            duration_seconds DOUBLE PRECISION,
+            elapsed_duration_seconds DOUBLE PRECISION,
+            elevation_gain_meters DOUBLE PRECISION,
+            calories DOUBLE PRECISION,
+            average_hr SMALLINT,
+            max_hr SMALLINT,
+            aerobic_training_effect DOUBLE PRECISION,
+            anaerobic_training_effect DOUBLE PRECISION,
+            avg_stroke_count DOUBLE PRECISION,
+            avg_swolf DOUBLE PRECISION,
+            pool_length_meters DOUBLE PRECISION,
+            average_power DOUBLE PRECISION,
+            normalized_power DOUBLE PRECISION,
+            max_power DOUBLE PRECISION,
+            raw_data JSONB DEFAULT '{}'::jsonb
+        );
+        CREATE TABLE IF NOT EXISTS garmin_daily_summary (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            synced_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            calendar_date DATE NOT NULL UNIQUE,
+            training_status TEXT,
+            training_load_7d DOUBLE PRECISION,
+            training_load_28d DOUBLE PRECISION,
+            vo2_max_run DOUBLE PRECISION,
+            vo2_max_cycling DOUBLE PRECISION,
+            recovery_time_hours INTEGER,
+            training_readiness_score INTEGER,
+            body_battery_high INTEGER,
+            body_battery_low INTEGER,
+            body_battery_at_wake INTEGER,
+            hrv_status TEXT,
+            hrv_7d_avg INTEGER,
+            hrv_last_night INTEGER,
+            sleep_score INTEGER,
+            sleep_duration_seconds INTEGER,
+            sleep_quality TEXT,
+            race_prediction_5k_seconds INTEGER,
+            race_prediction_10k_seconds INTEGER,
+            race_prediction_half_seconds INTEGER,
+            race_prediction_marathon_seconds INTEGER,
+            endurance_score INTEGER,
+            average_stress INTEGER,
+            resting_heart_rate INTEGER,
+            hill_score INTEGER,
+            raw_data JSONB DEFAULT '{}'::jsonb
+        );
+        CREATE TABLE IF NOT EXISTS athlete_biometrics (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            date DATE NOT NULL UNIQUE,
+            weight_kg DOUBLE PRECISION,
+            body_fat_pct DOUBLE PRECISION,
+            muscle_mass_kg DOUBLE PRECISION,
+            bmi DOUBLE PRECISION,
+            fitness_age INTEGER,
+            actual_age INTEGER,
+            lactate_threshold_hr INTEGER,
+            lactate_threshold_pace DOUBLE PRECISION,
+            cycling_ftp INTEGER,
+            vo2_max_detailed JSONB,
+            raw_data JSONB DEFAULT '{}'::jsonb,
+            synced_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+    """)
     op.create_table('athlete_profile',
     sa.Column('id', sa.UUID(), nullable=False),
     sa.Column('notes', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
