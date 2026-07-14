@@ -110,6 +110,9 @@ race details, or API secrets).
 - `web/`: React + Vite frontend for dashboard, calendar, races, and chat
 - `deploy/`: macOS LaunchAgent scripts for local service management
 
+The Garmin migration contract is documented in
+[`docs/superpowers/contracts/garmin-sync-contract.md`](docs/superpowers/contracts/garmin-sync-contract.md).
+
 ## Requirements
 
 - Python 3.12+
