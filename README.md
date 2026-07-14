@@ -187,7 +187,7 @@ cd api
 cp .env.example .env
 uv sync --group dev
 uv run alembic upgrade head
-uv run uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
+uv run uvicorn src.main:app --host 0.0.0.0 --port 8001 --reload
 ```
 
 2. Web setup (new terminal):
@@ -200,7 +200,7 @@ npm run dev -- --host 0.0.0.0 --port 4100
 
 3. Open `http://127.0.0.1:4100`
 
-The web app proxies `/api` requests to `http://127.0.0.1:8000`.
+The web app proxies `/api` requests to `http://127.0.0.1:8001`.
 
 ## Refresh + Garmin Sync
 

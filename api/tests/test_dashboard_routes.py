@@ -176,11 +176,15 @@ async def test_dashboard_trends_with_params():
         )
     assert resp.status_code == 200
     data = resp.json()
-    assert data["start"] == "2026-01-01"
-    assert data["end"] == "2026-01-31"
     assert data["requested_start"] == "2026-01-01"
     assert data["requested_end"] == "2026-01-31"
     assert data["metric"] == "sleep_score"
+    if data["earliest_data_date"] and data["earliest_data_date"] > data["requested_end"]:
+        assert data["range_adjusted"] is True
+        assert data["start"] == data["earliest_data_date"]
+    else:
+        assert data["start"] == "2026-01-01"
+        assert data["end"] == "2026-01-31"
     assert "series" in data
     assert "series_summary" in data
     assert "volume" in data
