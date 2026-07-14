@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date
+import os
 
 from src.config import Settings
 from src.integrations.garmin.config import GarminIntegrationSettings
@@ -67,6 +68,19 @@ def test_worker_peloton_flag_does_not_run_full_garmin_sync_when_disabled(tmp_pat
     assert report["domains"]["peloton"]["reason"] == "peloton_disabled"
 
 
+def test_worker_recovers_orphaned_lock(tmp_path):
+    settings = integration_settings(tmp_path)
+    settings.lock_path.mkdir()
+    (settings.lock_path / "pid").write_text("999999999")
+
+    report = GarminWorker(settings, client_factory=FakeClient).run(
+        GarminWorkerArgs(daily_only=True, days_back=2)
+    )
+
+    assert report["status"] == "success"
+    assert not settings.lock_path.exists()
+
+
 def test_worker_skips_when_disabled(tmp_path):
     app_settings = Settings(
         garmin_integration_enabled=False,
@@ -83,9 +97,11 @@ def test_worker_skips_when_disabled(tmp_path):
 def test_worker_skips_when_another_process_holds_lock(tmp_path):
     settings = integration_settings(tmp_path)
     settings.lock_path.mkdir()
+    (settings.lock_path / "pid").write_text(str(os.getpid()))
 
     report = GarminWorker(settings, client_factory=FakeClient).run(GarminWorkerArgs())
 
     assert report["status"] == "skipped"
     assert report["skipped"][0]["reason"] == "sync_already_running"
+    (settings.lock_path / "pid").unlink()
     settings.lock_path.rmdir()

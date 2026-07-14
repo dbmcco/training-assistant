@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import shutil
 from pathlib import Path
 
@@ -14,9 +15,24 @@ class GarminSyncLock:
     def acquire(self) -> None:
         try:
             self.path.mkdir(parents=True)
+            (self.path / "pid").write_text(str(os.getpid()))
             self._held = True
-        except FileExistsError as exc:
-            raise RuntimeError(f"Garmin sync already running: {self.path}") from exc
+            return
+        except FileExistsError:
+            if not self._is_stale():
+                raise RuntimeError(f"Garmin sync already running: {self.path}")
+            shutil.rmtree(self.path, ignore_errors=True)
+            self.path.mkdir(parents=True)
+            (self.path / "pid").write_text(str(os.getpid()))
+            self._held = True
+
+    def _is_stale(self) -> bool:
+        try:
+            pid = int((self.path / "pid").read_text().strip())
+            os.kill(pid, 0)
+            return False
+        except (OSError, ValueError):
+            return True
 
     def release(self) -> None:
         if self._held:
