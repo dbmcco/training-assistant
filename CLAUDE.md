@@ -7,7 +7,7 @@ Personal triathlon training coach — API-first with streaming AI coach, Garmin/
 - **`api/`** — FastAPI backend (Python 3.12, uv, async SQLAlchemy + asyncpg)
 - **`web/`** — React + Vite + TypeScript frontend (Tailwind, TanStack Query)
 - **`deploy/`** — macOS LaunchAgent service scripts
-- **DB** — PostgreSQL `assistant` on localhost:5432 (shared with garmin-connect-sync)
+- **DB** — PostgreSQL `assistant` on localhost:5432 (owned by Training Assistant migrations)
 
 ### Ports
 
@@ -23,6 +23,7 @@ api/src/
 ├── agent/           # Coach agent (coach.py, personality.py, tools.py)
 ├── routers/         # FastAPI routes (chat, dashboard, plan, races, recommendations, ...)
 ├── services/        # Business logic (recommendations, assistant_plan, garmin_refresh, garmin_writeback, memory_store, plan_engine, analytics, ...)
+├── integrations/    # Training Assistant-owned Garmin and Peloton clients/workers
 ├── db/              # SQLAlchemy models + Alembic migrations
 ├── config.py        # Pydantic Settings (.env loader)
 └── main.py          # FastAPI app
@@ -33,7 +34,7 @@ api/src/
 - **`recommendations.py`** — Intent/approval pipeline: `create_plan_change_intent` → athlete approval → `decide_recommendation` → Garmin writeback
 - **`assistant_plan.py`** — AI-generated training plan (rolling multi-day, Garmin sync)
 - **`garmin_writeback.py`** — Pushes workout changes to Garmin Connect
-- **`garmin_refresh.py`** — On-demand Garmin daily data pull via garmin-connect-sync
+- **`garmin_refresh.py`** — On-demand Garmin daily data pull through the internal Garmin worker
 - **`memory_store.py`** — PG vector embeddings for coach long-term memory
 - **`plan_engine.py`** — Plan adherence, completion matching, stats
 
@@ -69,9 +70,10 @@ cd web && npm run build
 
 ## Data Dependencies
 
-This repo reads tables populated by sibling `garmin-connect-sync`:
+Training Assistant owns and populates these Garmin-backed tables through its
+internal worker and Alembic migrations:
 - `garmin_activities`, `garmin_daily_summary`, `athlete_biometrics`
-- `planned_workouts` (calendar sync writes here too)
+- `planned_workouts` (assistant calendar ownership writes here too)
 
 ## Key Config (.env)
 
@@ -80,6 +82,8 @@ This repo reads tables populated by sibling `garmin-connect-sync`:
 - `COACH_MODEL` — Claude model ID
 - `PLAN_OWNERSHIP_MODE` — `garmin` (default) or `assistant`
 - `GARMIN_REFRESH_*` — refresh interval and backfill window
+- `GARMIN_TOKENSTORE_PATH` — Training Assistant-owned Garmin token store
+- `GARMIN_SYNC_*` — worker lock, timeout, and calendar window settings
 
 <!-- driftdriver-claude:start -->
 ## Speedrift Ecosystem
