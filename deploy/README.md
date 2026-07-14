@@ -47,3 +47,22 @@ tailscale serve --https=3572 --bg 4100
 
 Verify the mapping with `tailscale serve status`. The Training Assistant API
 remains behind the web proxy on local port `8001`.
+
+## Garmin sync worker
+
+The Training Assistant-owned Garmin worker is installed from:
+
+```bash
+cp deploy/com.training.garmin-sync.plist "$HOME/Library/LaunchAgents/"
+launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.training.garmin-sync.plist"
+```
+
+Run it manually from the API environment with:
+
+```bash
+cd api
+./scripts/run_garmin_sync.sh
+```
+
+Do not enable this job until the cutover runbook records that the legacy Garmin
+scheduler is disabled and the shadow/canary checks have passed.
