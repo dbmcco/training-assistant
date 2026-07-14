@@ -1,45 +1,23 @@
 from pathlib import Path
 
 from src.config import settings
+from src.integrations.garmin.worker import GarminWorkerArgs
 from src.services.garmin_refresh import _refresh_dashboard_data
 
 
-def _prepare_fake_runtime(tmp_path: Path, monkeypatch):
-    repo = tmp_path / "garmin-sync"
-    repo.mkdir()
-    sync_script = repo / "sync.py"
-    sync_script.write_text("#!/usr/bin/env python3\n")
+def test_refresh_uses_configured_days_back(monkeypatch):
+    captured: list[GarminWorkerArgs] = []
 
-    python_bin = tmp_path / "python3"
-    python_bin.write_text("#!/usr/bin/env python3\n")
+    def fake_run_worker(args: GarminWorkerArgs):
+        captured.append(args)
+        return {"status": "success", "domains": {"daily_summary": {"updated": 2}}}
 
-    monkeypatch.setattr(
-        "src.services.garmin_refresh._resolve_repo_and_python",
-        lambda: (repo, python_bin),
-    )
+    monkeypatch.setattr("src.services.garmin_refresh._run_worker", fake_run_worker)
     monkeypatch.setattr("src.services.garmin_refresh._acquire_lock", lambda: True)
     monkeypatch.setattr("src.services.garmin_refresh._release_lock", lambda: None)
-    monkeypatch.setattr(
-        "src.services.garmin_refresh._load_last_success_epoch",
-        lambda: None,
-    )
-    monkeypatch.setattr(
-        "src.services.garmin_refresh._store_last_success_epoch",
-        lambda _epoch: None,
-    )
-
-
-def test_refresh_uses_configured_days_back(tmp_path, monkeypatch):
-    _prepare_fake_runtime(tmp_path, monkeypatch)
-    captured: list[list[str]] = []
-
-    def fake_run_cmd(cmd: list[str], cwd: Path, timeout_seconds: int):
-        captured.append(cmd)
-        return {"status": "success", "command": cmd}
-
-    monkeypatch.setattr("src.services.garmin_refresh._run_cmd", fake_run_cmd)
+    monkeypatch.setattr("src.services.garmin_refresh._load_last_success_epoch", lambda: None)
+    monkeypatch.setattr("src.services.garmin_refresh._store_last_success_epoch", lambda _: None)
     monkeypatch.setattr(settings, "garmin_refresh_enabled", True)
-    monkeypatch.setattr(settings, "garmin_refresh_timeout_seconds", 30)
     monkeypatch.setattr(settings, "garmin_refresh_min_interval_seconds", 0)
     monkeypatch.setattr(settings, "garmin_refresh_days_back", 2)
 
@@ -47,20 +25,22 @@ def test_refresh_uses_configured_days_back(tmp_path, monkeypatch):
 
     assert result["status"] == "success"
     assert result["days_back"] == 2
-    assert captured[0][-2:] == ["--days-back", "2"]
+    assert captured == [GarminWorkerArgs(daily_only=True, days_back=2)]
 
 
-def test_refresh_clamps_negative_days_back(tmp_path, monkeypatch):
-    _prepare_fake_runtime(tmp_path, monkeypatch)
-    captured: list[list[str]] = []
+def test_refresh_clamps_negative_days_back(monkeypatch):
+    captured: list[GarminWorkerArgs] = []
 
-    def fake_run_cmd(cmd: list[str], cwd: Path, timeout_seconds: int):
-        captured.append(cmd)
-        return {"status": "success", "command": cmd}
+    def fake_run_worker(args: GarminWorkerArgs):
+        captured.append(args)
+        return {"status": "success"}
 
-    monkeypatch.setattr("src.services.garmin_refresh._run_cmd", fake_run_cmd)
+    monkeypatch.setattr("src.services.garmin_refresh._run_worker", fake_run_worker)
+    monkeypatch.setattr("src.services.garmin_refresh._acquire_lock", lambda: True)
+    monkeypatch.setattr("src.services.garmin_refresh._release_lock", lambda: None)
+    monkeypatch.setattr("src.services.garmin_refresh._load_last_success_epoch", lambda: None)
+    monkeypatch.setattr("src.services.garmin_refresh._store_last_success_epoch", lambda _: None)
     monkeypatch.setattr(settings, "garmin_refresh_enabled", True)
-    monkeypatch.setattr(settings, "garmin_refresh_timeout_seconds", 30)
     monkeypatch.setattr(settings, "garmin_refresh_min_interval_seconds", 0)
     monkeypatch.setattr(settings, "garmin_refresh_days_back", -5)
 
@@ -68,20 +48,22 @@ def test_refresh_clamps_negative_days_back(tmp_path, monkeypatch):
 
     assert result["status"] == "success"
     assert result["days_back"] == 0
-    assert captured[0][-2:] == ["--days-back", "0"]
+    assert captured == [GarminWorkerArgs(daily_only=True, days_back=0)]
 
 
-def test_refresh_skips_calendar_sync_in_assistant_mode(tmp_path, monkeypatch):
-    _prepare_fake_runtime(tmp_path, monkeypatch)
-    captured: list[list[str]] = []
+def test_refresh_runs_calendar_in_assistant_mode_without_importing_generic_workouts(monkeypatch):
+    captured: list[GarminWorkerArgs] = []
 
-    def fake_run_cmd(cmd: list[str], cwd: Path, timeout_seconds: int):
-        captured.append(cmd)
-        return {"status": "success", "command": cmd}
+    def fake_run_worker(args: GarminWorkerArgs):
+        captured.append(args)
+        return {"status": "success", "domains": {"calendar": {"workouts": 0, "races": 1}}}
 
-    monkeypatch.setattr("src.services.garmin_refresh._run_cmd", fake_run_cmd)
+    monkeypatch.setattr("src.services.garmin_refresh._run_worker", fake_run_worker)
+    monkeypatch.setattr("src.services.garmin_refresh._acquire_lock", lambda: True)
+    monkeypatch.setattr("src.services.garmin_refresh._release_lock", lambda: None)
+    monkeypatch.setattr("src.services.garmin_refresh._load_last_success_epoch", lambda: None)
+    monkeypatch.setattr("src.services.garmin_refresh._store_last_success_epoch", lambda _: None)
     monkeypatch.setattr(settings, "garmin_refresh_enabled", True)
-    monkeypatch.setattr(settings, "garmin_refresh_timeout_seconds", 30)
     monkeypatch.setattr(settings, "garmin_refresh_min_interval_seconds", 0)
     monkeypatch.setattr(settings, "garmin_refresh_days_back", 1)
     monkeypatch.setattr(settings, "plan_ownership_mode", "assistant")
@@ -89,7 +71,9 @@ def test_refresh_skips_calendar_sync_in_assistant_mode(tmp_path, monkeypatch):
     result = _refresh_dashboard_data(include_calendar=True, force=True)
 
     assert result["status"] == "success"
-    assert result["include_calendar"] is False
-    assert result["include_calendar_requested"] is True
-    assert result["calendar_skipped_reason"] == "assistant_owned_plan_mode"
-    assert len(captured) == 1
+    assert result["include_calendar"] is True
+    assert result["calendar_skipped_reason"] is None
+    assert captured == [
+        GarminWorkerArgs(daily_only=True, days_back=1),
+        GarminWorkerArgs(calendar_only=True, days_back=1),
+    ]
