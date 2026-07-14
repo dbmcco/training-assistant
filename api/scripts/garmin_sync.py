@@ -21,6 +21,7 @@ def parse_args() -> GarminWorkerArgs:
     parser.add_argument("--calendar-only", action="store_true")
     parser.add_argument("--comprehensive", action="store_true")
     parser.add_argument("--calendar", action="store_true")
+    parser.add_argument("--peloton", action="store_true")
     args = parser.parse_args()
     return GarminWorkerArgs(
         days_back=args.days_back,
@@ -29,6 +30,7 @@ def parse_args() -> GarminWorkerArgs:
         calendar_only=args.calendar_only,
         comprehensive=args.comprehensive,
         calendar=args.calendar,
+        peloton=args.peloton,
     )
 
 

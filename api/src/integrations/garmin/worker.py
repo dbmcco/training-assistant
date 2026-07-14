@@ -6,6 +6,7 @@ from typing import Callable
 
 from src.integrations.garmin.config import GarminIntegrationSettings
 from src.integrations.garmin.locks import GarminSyncLock
+from src.integrations.garmin.peloton import GarminPelotonImporter
 from src.integrations.garmin.report import SyncReport
 from src.integrations.garmin.sync_engine import GarminSyncClient
 
@@ -18,6 +19,7 @@ class GarminWorkerArgs:
     calendar_only: bool = False
     comprehensive: bool = False
     calendar: bool = False
+    peloton: bool = False
 
 
 class GarminWorker:
@@ -69,6 +71,12 @@ class GarminWorker:
                     include_calendar=args.calendar,
                 )
                 report.add_domain("sync", result)
+
+            if args.peloton:
+                report.add_domain(
+                    "peloton",
+                    GarminPelotonImporter(self.integration_settings).sync(days_back),
+                )
             return report.as_dict()
         except Exception as exc:
             report.add_failure("worker", exc)
