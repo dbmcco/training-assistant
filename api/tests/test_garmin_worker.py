@@ -56,6 +56,17 @@ def test_worker_runs_daily_sync_and_releases_lock(tmp_path):
     assert not settings.lock_path.exists()
 
 
+def test_worker_peloton_flag_does_not_run_full_garmin_sync_when_disabled(tmp_path):
+    settings = integration_settings(tmp_path)
+    worker = GarminWorker(settings, client_factory=FakeClient)
+
+    report = worker.run(GarminWorkerArgs(peloton=True, days_back=7))
+
+    assert report["status"] == "success"
+    assert report["domains"]["peloton"]["status"] == "skipped"
+    assert report["domains"]["peloton"]["reason"] == "peloton_disabled"
+
+
 def test_worker_skips_when_disabled(tmp_path):
     app_settings = Settings(
         garmin_integration_enabled=False,

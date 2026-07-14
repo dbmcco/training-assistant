@@ -50,6 +50,12 @@ class GarminWorker:
         try:
             client = self.client_factory(self.integration_settings)
             days_back = max(args.days_back, 0)
+            if args.peloton:
+                report.add_domain(
+                    "peloton",
+                    GarminPelotonImporter(self.integration_settings).sync(days_back),
+                )
+                return report.as_dict()
             if args.calendar_only:
                 client.ensure_schema()
                 result = client.sync_calendar(
@@ -72,11 +78,6 @@ class GarminWorker:
                 )
                 report.add_domain("sync", result)
 
-            if args.peloton:
-                report.add_domain(
-                    "peloton",
-                    GarminPelotonImporter(self.integration_settings).sync(days_back),
-                )
             return report.as_dict()
         except Exception as exc:
             report.add_failure("worker", exc)
