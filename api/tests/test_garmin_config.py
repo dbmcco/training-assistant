@@ -14,7 +14,7 @@ def test_garmin_settings_default_to_training_assistant_paths(tmp_path):
 
     assert integration.tokenstore_path == tmp_path / "garmin-tokenstore"
     assert integration.lock_path == tmp_path / "garmin-sync.lock"
-    assert "garmin-connect-sync" not in str(integration.tokenstore_path)
+    assert integration.tokenstore_path.name == "garmin-tokenstore"
 
 
 def test_assistant_plan_mode_is_preserved():

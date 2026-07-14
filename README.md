@@ -120,66 +120,37 @@ The Garmin migration contract is documented in
 - Node.js 20+ and npm
 - PostgreSQL
 
-## Data Dependency Notes
+## Garmin and Peloton Integration
 
-The API reads Garmin tables that are not fully created by this repo's migrations:
+Training Assistant owns the Garmin-backed tables through Alembic migrations and
+runs the Garmin and Peloton worker from `api/scripts/`. The integration covers
+activities, recovery summaries, biometrics, calendar races, assistant-owned
+workouts, activity details, gear, and Peloton imports.
 
-- `garmin_activities`
-- `garmin_daily_summary`
-- `athlete_biometrics`
-
-These are expected to be populated by the sibling `garmin-connect-sync` workflow
-in the same `experiments/` workspace.
-
-If Garmin sync is not configured yet, you can still run the app by disabling
-Garmin refresh/writeback in `api/.env` (see `api/.env.example`).
-
-### External Sync Pipeline (Garmin + Peloton)
-
-`training-assistant` depends on `garmin-connect-sync` for ingestion.
-
-- Garmin activity/recovery/calendar sync: `sync.py`
-- Peloton to Garmin bridge: `peloton_sync.py`
-- Scheduled combined sync runner: `run_sync.sh` (runs both)
-
-Expected workspace layout:
-
-- `/path/to/experiments/training-assistant`
-- `/path/to/experiments/garmin-connect-sync`
-
-First-time setup for ingestion:
+First-time setup:
 
 ```bash
-cd ../garmin-connect-sync
+cd api
 cp .env.example .env
-# Edit .env:
-#   DATABASE_URL=postgresql://<db-user>:<db-pass>@localhost:5432/assistant
-#   PELOTON_EMAIL=<your email>
-#   PELOTON_PASSWORD=<your password>
-
-# Authenticate Garmin and cache tokens
-python3 auth.py
-
-# Run combined Garmin + Peloton sync
-./run_sync.sh
+uv sync --group dev
+uv run alembic upgrade head
+# Copy the authenticated Garmin token store as described in
+# docs/superpowers/runbooks/garmin-cutover.md.
+uv run python scripts/verify_garmin_schema.py
 ```
 
-Install scheduled sync jobs:
+Manual sync commands:
 
 ```bash
-cd ../garmin-connect-sync
-./install.sh
+cd api
+./scripts/run_garmin_sync.sh
+uv run python scripts/garmin_sync.py --daily-only --days-back 2
+uv run python scripts/garmin_sync.py --calendar-only
+uv run python scripts/garmin_sync.py --peloton --days-back 7
 ```
 
-Manual commands:
-
-```bash
-# Combined Garmin + Peloton sync
-cd ../garmin-connect-sync && ./run_sync.sh
-
-# Peloton-only sync window
-cd ../garmin-connect-sync && .venv/bin/python3 peloton_sync.py --days-back 7
-```
+The scheduled worker is defined by `deploy/com.training.garmin-sync.plist`.
+Keep it disabled until the cutover runbook records parity and rollback evidence.
 
 ## Quick Start
 
@@ -208,10 +179,10 @@ The web app proxies `/api` requests to `http://127.0.0.1:8001`.
 ## Refresh + Garmin Sync
 
 - Dashboard refresh endpoint: `POST /api/v1/dashboard/refresh`
-- On-demand refresh pulls latest daily metrics via `garmin-connect-sync`
+- On-demand refresh calls the Training Assistant-owned Garmin worker
 - Refresh cadence is controlled by `GARMIN_REFRESH_MIN_INTERVAL_SECONDS`
 - Refresh backfill window is controlled by `GARMIN_REFRESH_DAYS_BACK` (default `1`)
-- This refresh endpoint is Garmin-focused; Peloton import runs via `garmin-connect-sync/run_sync.sh`
+- The scheduled worker runs Garmin ingestion and Peloton import from the API environment
 
 ## Assistant-Owned Plan Mode
 
@@ -220,7 +191,7 @@ If you want the agent (not Garmin adaptive planning) to own your training plan:
 - Set `PLAN_OWNERSHIP_MODE=assistant` in `api/.env`
 - Delete/pause Garmin adaptive training plan in Garmin Connect
 - Use `POST /api/v1/plan/assistant/generate` to build a rolling plan
-- The app will keep ingesting Garmin activities/recovery metrics, but skip Garmin calendar ingestion on refresh
+- The app will keep ingesting Garmin activities, recovery metrics, and races; generic Garmin calendar workouts are skipped so the assistant remains the plan owner
 
 Behavior in this mode:
 
