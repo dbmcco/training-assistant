@@ -1072,6 +1072,9 @@ class GarminSyncClient:
             event_uuid = item.get('shareableEventUuid') or f"race-{item_date}-{title}"
             if not title or not item_date:
                 continue
+            # Skip subscribed Garmin race events the athlete has dismissed
+            if event_uuid in self._integration_settings.dismissed_garmin_event_uuids:
+                continue
 
             # Determine distance_type from title or completionTarget
             distance_type = 'other'

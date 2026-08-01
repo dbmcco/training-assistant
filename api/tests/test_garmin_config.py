@@ -35,3 +35,23 @@ def test_negative_windows_are_clamped_and_timeout_has_safe_floor():
     assert integration.days_back == 0
     assert integration.calendar_months_ahead == 0
     assert integration.timeout_seconds == 5
+
+
+def test_dismissed_garmin_event_uuids_parse_to_tuple():
+    # The athlete dismisses races by listing their shareableEventUuid values;
+    # sync_calendar skips any race whose uuid is in this set.
+    app_settings = Settings(dismissed_garmin_event_uuids=" abc-123 ,def-456,, ")
+
+    integration = GarminIntegrationSettings.from_app_settings(app_settings)
+
+    assert integration.dismissed_garmin_event_uuids == ("abc-123", "def-456")
+
+
+def test_dismissed_garmin_event_uuids_empty_string_yields_empty_tuple():
+    # Explicit override keeps the test deterministic even when the host
+    # environment has DISMISSED_GARMIN_EVENT_UUIDS exported.
+    integration = GarminIntegrationSettings.from_app_settings(
+        Settings(dismissed_garmin_event_uuids="")
+    )
+
+    assert integration.dismissed_garmin_event_uuids == ()

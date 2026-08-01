@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     garmin_sync_days_back: int = 2
     garmin_calendar_months_ahead: int = 5
     garmin_sync_timeout_seconds: int = 300
+    dismissed_garmin_event_uuids: str = ""
     peloton_enabled: bool = False
     peloton_email: str = ""
     peloton_password: str = ""

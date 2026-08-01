@@ -15,6 +15,7 @@ class GarminIntegrationSettings:
     calendar_months_ahead: int
     timeout_seconds: int
     plan_ownership_mode: str
+    dismissed_garmin_event_uuids: tuple[str, ...]
     peloton_enabled: bool
     peloton_email: str
     peloton_password: str
@@ -31,6 +32,11 @@ class GarminIntegrationSettings:
             calendar_months_ahead=max(app_settings.garmin_calendar_months_ahead, 0),
             timeout_seconds=max(app_settings.garmin_sync_timeout_seconds, 5),
             plan_ownership_mode=app_settings.plan_ownership_mode.strip().lower(),
+            dismissed_garmin_event_uuids=tuple(
+                u.strip()
+                for u in app_settings.dismissed_garmin_event_uuids.split(",")
+                if u.strip()
+            ),
             peloton_enabled=app_settings.peloton_enabled,
             peloton_email=app_settings.peloton_email,
             peloton_password=app_settings.peloton_password,
