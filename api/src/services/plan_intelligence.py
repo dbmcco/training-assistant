@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.config import settings
 from src.db.models import (
     AthleteBiometrics,
+    AthleteProfile,
     Conversation,
     GarminActivity,
     GarminDailySummary,
@@ -59,6 +60,21 @@ def _next_planning_window(today: date) -> tuple[date, date]:
     else:
         window_start = today + timedelta(days=days_to_monday)
     return window_start, window_start + timedelta(days=6)
+
+
+def _render_profile_notes(notes: Any) -> str:
+    """Render athlete profile notes (JSONB) into a readable preference list."""
+    if not notes:
+        return ""
+    if isinstance(notes, dict):
+        lines = []
+        for key, val in notes.items():
+            if val is None or str(val).strip() == "":
+                continue
+            label = str(key).replace("_", " ").title()
+            lines.append(f"- {label}: {val}")
+        return "\n".join(lines)
+    return str(notes)
 
 
 async def gather_planning_context(session: AsyncSession) -> dict[str, Any]:
@@ -207,6 +223,11 @@ async def gather_planning_context(session: AsyncSession) -> dict[str, Any]:
         if bio_row.weight_kg:
             biometrics["weight_kg"] = bio_row.weight_kg
 
+    # Athlete preferences / goals (drives strength emphasis and targeting)
+    profile_result = await session.execute(select(AthleteProfile).limit(1))
+    profile = profile_result.scalar_one_or_none()
+    profile_notes = _render_profile_notes(profile.notes) if profile else ""
+
     return {
         "today": today.isoformat(),
         "races": races,
@@ -217,6 +238,7 @@ async def gather_planning_context(session: AsyncSession) -> dict[str, Any]:
         "load": load,
         "discipline_balance": discipline_balance,
         "biometrics": biometrics,
+        "profile_notes": profile_notes,
         "planning_window_start": planning_window_start.isoformat(),
         "planning_window_end": planning_window_end.isoformat(),
     }
@@ -233,6 +255,7 @@ Your planning principles:
 - Hard days hard, easy days easy. Polarize intentionally
 - If the athlete missed workouts last week, don't stack them — restructure
 - Account for life: rest days matter, don't schedule 7 days straight
+- Strength is foundational for durability and injury prevention, not accessory filler. Honor the athlete's stated strength emphasis — program concrete sessions (exercises, sets, reps) for the requested frequency and focus
 
 For each workout, provide concrete session structure:
 - Run: miles and pace ranges (per mile)
@@ -372,6 +395,10 @@ def build_planning_prompt(ctx: dict[str, Any]) -> tuple[str, str]:
             bio_parts.append(f"Weight {bio['weight_kg']} kg")
         if bio_parts:
             user_parts.append(f"## Biometrics: {', '.join(bio_parts)}\n")
+
+    # Athlete preferences & goals (strength emphasis, race targeting, etc.)
+    if ctx.get("profile_notes"):
+        user_parts.append(f"## Athlete Preferences & Goals\n{ctx['profile_notes']}\n")
 
     return PLANNING_SYSTEM_PROMPT, "\n".join(user_parts)
 
