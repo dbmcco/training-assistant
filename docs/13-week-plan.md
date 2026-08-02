@@ -13,6 +13,19 @@ STRENGTH (mandatory, concrete, all 3 pillars): CORE (dead bug, bird dog, Pallof 
 RACES: Surftown Half Sun Sep 13 (W6, B-race tune-up). Hartford Half Sat Oct 10 (W10, A-race GOAL).
 
 
+## Pre-Plan — Sun 2026-08-02 (Bridge Run)
+
+### Pre-Plan-Day1 - Sun 2026-08-02
+**Discipline:** Run — Easy
+**Session:** Easy Aerobic Run (50 min)
+**Details:**
+- 5 mi continuous @ 10:00–10:45/mi (fully conversational, zone 2)
+- Keep HR 150–160; govern by effort — August heat will push HR high
+- Morning: get out before the heat peaks
+- Optional: 4×20 sec relaxed strides at the end, full recovery
+*Cue: If you can't hold a full sentence, slow down.*
+
+
 ## Week 1 — Build I (2026-08-03 through 2026-08-09)
 
 ### Week1-Day1 - Mon 2026-08-03
