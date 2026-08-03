@@ -22,6 +22,31 @@ from src.integrations.garmin.events import publish_event
 API_DELAY_SECONDS = 1.0
 
 
+def _coerce_int(value: Any) -> Optional[int]:
+    """Best-effort int coercion; returns None for missing/unparseable values."""
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def intensity_minutes_from_summary(user_summary: Any) -> Tuple[Optional[int], Optional[int]]:
+    """Source moderate/vigorous weekly intensity minutes from the user summary.
+
+    Garmin exposes intensity minutes inside the user-summary endpoint rather than
+    a standalone call (the sync engine previously invoked a non-existent
+    standalone intensity-minutes method on the client). Read them from data we
+    already fetch.
+    """
+    if not isinstance(user_summary, dict):
+        return None, None
+    moderate = _coerce_int(user_summary.get("moderateIntensityMinutes"))
+    vigorous = _coerce_int(user_summary.get("vigorousIntensityMinutes"))
+    return moderate, vigorous
+
+
 def _calendar_workout_record(
     item: Dict[str, Any], *, today: date | None = None
 ) -> Optional[Dict[str, Any]]:
@@ -262,10 +287,7 @@ class GarminSyncClient:
         user_summary = self._safe_get("get_user_summary", date_str)
         respiration = self._safe_get("get_respiration_data", date_str)
         spo2 = self._safe_get("get_spo2_data", date_str)
-        intensity = self._safe_get("get_intensity_minutes_data", date_str)
         heart_rates = self._safe_get("get_heart_rates", date_str)
-        bb_events = self._safe_get("get_body_battery_events", date_str)
-        morning_readiness = self._safe_get("get_morning_training_readiness", date_str)
 
         def _dig(data: Any, *keys: str) -> Any:
             """Safely navigate nested dicts. Returns None if any key missing."""
@@ -326,21 +348,9 @@ class GarminSyncClient:
                 bb_high = max(bb_values)
                 bb_low = min(bb_values)
 
-        # Derive wake value from sleep event (last BB reading when sleep ended)
-        if isinstance(bb_events, list):
-            for evt in bb_events:
-                event_info = evt.get("event") or {}
-                if event_info.get("eventType") == "SLEEP":
-                    sleep_bb_arr = evt.get("bodyBatteryValuesArray") or []
-                    # bodyBatteryLevel is at index 2 per the descriptor
-                    sleep_bb_vals = [
-                        v[2] for v in sleep_bb_arr
-                        if isinstance(v, list) and len(v) >= 3 and v[2] is not None
-                    ]
-                    if sleep_bb_vals:
-                        bb_wake = sleep_bb_vals[-1]
-                    break
-        # Fallback: if no sleep event found, use body_battery_high (peak is typically at wake)
+        # Body-battery "wake" value: the garminconnect library exposes the battery
+        # series (get_body_battery) but not the sleep/wake event stream, so we
+        # approximate the wake value with the day's peak (typically at wake).
         if bb_wake is None and bb_high is not None:
             bb_wake = bb_high
 
@@ -380,13 +390,16 @@ class GarminSyncClient:
         total_calories_val = _dig(user_summary, "totalKilocalories")
         active_calories_val = _dig(user_summary, "activeKilocalories")
         daily_distance_val = _dig(user_summary, "totalDistanceMeters")
-        active_min_mod = _dig(intensity, "moderateIntensityMinutes")
-        active_min_vig = _dig(intensity, "vigorousIntensityMinutes")
+        # Intensity minutes: Garmin exposes these inside the user summary, not via
+        # a standalone endpoint. Source them from data we already fetch.
+        active_min_mod, active_min_vig = intensity_minutes_from_summary(user_summary)
         respiration_avg_val = _dig(respiration, "avgWakingRespirationValue")
         spo2_avg_val = _dig(spo2, "averageSpO2")
         spo2_low_val = _dig(spo2, "lowestSpO2")
-        morning_readiness_val = _dig(morning_readiness, "score")
-        bb_events_json = bb_events if bb_events else None
+        # morning_readiness is the same Garmin Training Readiness metric already
+        # captured above as readiness_score; no separate source exists.
+        morning_readiness_val = None
+        bb_events_json = None
         hr_zones_json = _dig(heart_rates, "heartRateZones") if heart_rates else None
 
         # Build raw_data blob
@@ -417,14 +430,8 @@ class GarminSyncClient:
             raw["respiration"] = respiration
         if spo2:
             raw["spo2"] = spo2
-        if intensity:
-            raw["intensity"] = intensity
         if heart_rates:
             raw["heart_rates"] = heart_rates
-        if bb_events:
-            raw["body_battery_events"] = bb_events
-        if morning_readiness:
-            raw["morning_readiness"] = morning_readiness
 
         try:
             cur = self.conn.cursor()
